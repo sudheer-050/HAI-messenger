@@ -1,5 +1,10 @@
 # HAI
 
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
+![Node](https://img.shields.io/badge/node-18-339933?logo=node.js&logoColor=white)
+![PWA](https://img.shields.io/badge/installable-PWA-5A0FC8)
+
 A self-hosted, end-to-end encrypted chat app. Single-file PWA frontend, a small Node/Express/Socket.IO backend, and a Docker Compose stack you run on your own machine — your messages never touch a third-party server.
 
 ## Features
@@ -59,3 +64,7 @@ frontend/         Single-file PWA (index.html, manifest, service worker, icons)
 docker-compose.yml
 .env.example       Copy to .env and fill in your own values
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
