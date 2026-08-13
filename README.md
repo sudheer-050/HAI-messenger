@@ -7,6 +7,8 @@
 
 A self-hosted, end-to-end encrypted chat app. Single-file PWA frontend, a small Node/Express/Socket.IO backend, and a Docker Compose stack you run on your own machine — your messages never touch a third-party server.
 
+**Live instance:** https://myhai.org (protected by HTTP Basic Auth)
+
 ## Features
 
 - **End-to-end encryption** — hybrid RSA-OAEP-2048 + AES-256-GCM envelope encryption. The server only ever relays ciphertext.

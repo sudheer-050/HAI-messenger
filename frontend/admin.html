@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HAI Admin</title>
+<script>
+    // Applied before first paint so there's no light-mode flash for a dark-mode admin.
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('hai_theme') || 'light');
+</script>
+<style>
+    :root {
+        --bg-main: #f4f6f8;
+        --bg-card: #ffffff;
+        --bg-sidebar: #ffffff;
+        --border: #e3e7eb;
+        --text-normal: #1c2430;
+        --text-muted: #6b7684;
+        --accent: #4a9ad9;
+        --accent-dim: rgba(74, 154, 217, 0.12);
+        --accent-red: #da373c;
+        --accent-green: #23a55a;
+        --shadow: 0 1px 3px rgba(20, 30, 40, 0.06), 0 1px 2px rgba(20, 30, 40, 0.04);
+    }
+    :root[data-theme="dark"] {
+        --bg-main: #14181d;
+        --bg-card: #1c2229;
+        --bg-sidebar: #191e24;
+        --border: #2a323b;
+        --text-normal: #eef1f4;
+        --text-muted: #8b96a3;
+        --accent: #5ba8e6;
+        --accent-dim: rgba(91, 168, 230, 0.14);
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; background: var(--bg-main); color: var(--text-normal);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    }
+    button, input, select { font-family: inherit; }
+
+    /* TOP BAR */
+    .topbar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-card); flex-shrink: 0;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 10px; }
+    .topbar-left h1 { font-size: 16px; margin: 0; font-weight: 700; }
+    .topbar-badge { font-size: 11px; background: var(--accent-dim); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    .btn {
+        border: 1px solid var(--border); background: var(--bg-card); color: var(--text-normal);
+        padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .btn:hover { background: var(--accent-dim); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { filter: brightness(1.08); }
+    .btn.danger { color: var(--accent-red); }
+    .btn.small { padding: 4px 9px; font-size: 12px; }
+
+    /* LAYOUT */
+    .app-body { display: flex; flex: 1; min-height: 0; }
+    .sidebar {
+        width: 220px; flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border);
+        padding: 14px 10px; overflow-y: auto;
+    }
+    .sidebar-heading { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 4px 8px 8px; }
+    .dash-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 6px;
+        padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; margin-bottom: 2px;
+    }
+    .dash-row:hover { background: var(--accent-dim); }
+    .dash-row.active { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+    .dash-row-actions { display: none; gap: 4px; }
+    .dash-row:hover .dash-row-actions { display: flex; }
+    .dash-row-actions button { border: none; background: none; cursor: pointer; color: var(--text-muted); font-size: 12px; padding: 2px; }
+    .dash-row-actions button:hover { color: var(--accent-red); }
+
+    .main { flex: 1; overflow-y: auto; padding: 20px 24px 60px; }
+
+    /* OVERVIEW CARDS */
+    .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .overview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+    .overview-card .value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .overview-card .label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* DASHBOARD HEADER */
+    .dashboard-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .dashboard-header h2 { font-size: 18px; margin: 0; }
+    .dashboard-header-actions { display: flex; gap: 8px; }
+
+    /* WIDGET GRID */
+    .widget-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .widget-card {
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+        box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 190px;
+    }
+    .widget-card.dragging { opacity: 0.4; }
+    .widget-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 6px; cursor: grab; }
+    .widget-card-title { font-size: 13.5px; font-weight: 700; }
+    .widget-card-sub { font-size: 11px; color: var(--text-muted); }
+    .widget-card-actions { display: flex; gap: 2px; }
+    .widget-card-actions button { border: none; background: none; cursor: pointer; color: var(--text-muted); font-size: 13px; padding: 3px 5px; border-radius: 5px; }
+    .widget-card-actions button:hover { background: var(--accent-dim); color: var(--accent); }
+    .widget-canvas-wrap { flex: 1; min-height: 120px; position: relative; }
+    .widget-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+    .widget-number-value { font-size: 34px; font-weight: 800; margin-top: 12px; font-variant-numeric: tabular-nums; }
+    .widget-number-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    .add-widget-card {
+        display: flex; align-items: center; justify-content: center; min-height: 190px;
+        border: 1.5px dashed var(--border); border-radius: 12px; cursor: pointer; color: var(--text-muted); font-size: 13px; font-weight: 600;
+    }
+    .add-widget-card:hover { border-color: var(--accent); color: var(--accent); }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+
+    /* MODALS */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(10, 14, 18, 0.45); align-items: center; justify-content: center; z-index: 100; }
+    .modal-overlay.open { display: flex; }
+    .modal-card { background: var(--bg-card); border-radius: 14px; padding: 20px; width: 380px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    .modal-card h3 { margin: 0 0 14px; font-size: 16px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+    .form-group input, .form-group select {
+        width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+        background: var(--bg-main); color: var(--text-normal); font-size: 13.5px;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    .reports-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+    .report-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; }
+    .report-row-email { font-weight: 600; }
+    .report-row-meta { color: var(--text-muted); font-size: 11px; }
+    .note-banner { font-size: 12px; color: var(--text-muted); background: var(--accent-dim); padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; }
+
+    /* ACCESS DENIED / LOADING */
+    .gate-screen { display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 12px; text-align: center; padding: 20px; }
+    .gate-screen h2 { margin: 0; }
+    .gate-screen p { color: var(--text-muted); max-width: 360px; margin: 0; }
+</style>
+</head>
+<body>
+
+<div id="gateScreen" class="gate-screen" style="display:none;">
+    <h2 id="gateTitle">Checking access…</h2>
+    <p id="gateMessage"></p>
+    <a class="btn primary" href="/" style="text-decoration:none; margin-top:8px;">Back to Chat</a>
+</div>
+
+<div id="appShell" style="display:none; flex-direction: column; height: 100%;">
+    <div class="topbar">
+        <div class="topbar-left">
+            <h1>HAI Admin</h1>
+            <span class="topbar-badge">Admin Mode</span>
+        </div>
+        <div class="topbar-right">
+            <span id="topbarUsername" style="font-size:13px; color: var(--text-muted);"></span>
+            <a class="btn" href="/ai.html" style="text-decoration:none;">🤖 AI Mode</a>
+            <a class="btn" href="/" style="text-decoration:none;">💬 Chat Mode</a>
+        </div>
+    </div>
+
+    <div class="app-body">
+        <div class="sidebar">
+            <div class="sidebar-heading">Dashboards</div>
+            <div id="dashboardList"></div>
+            <button type="button" class="btn small" style="width:100%; margin-top:8px;" onclick="createDashboard()">+ New Dashboard</button>
+        </div>
+
+        <div class="main">
+            <div class="overview-grid" id="overviewGrid"></div>
+
+            <div class="dashboard-header">
+                <h2 id="activeDashboardName">Dashboard</h2>
+                <div class="dashboard-header-actions">
+                    <button type="button" class="btn small" onclick="openReportsModal()">📧 Scheduled Reports</button>
+                    <button type="button" class="btn small primary" onclick="openWidgetModal()">+ Add Widget</button>
+                </div>
+            </div>
+
+            <div id="widgetGrid" class="widget-grid"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ADD/EDIT WIDGET -->
+<div class="modal-overlay" id="widgetModalOverlay">
+    <div class="modal-card">
+        <h3 id="widgetModalHeading">Add Widget</h3>
+        <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="widgetTitleInput" placeholder="e.g. Daily Signups">
+        </div>
+        <div class="form-group">
+            <label>Metric</label>
+            <select id="widgetMetricSelect"></select>
+        </div>
+        <div class="form-group">
+            <label>Chart type</label>
+            <select id="widgetChartTypeSelect">
+                <option value="line">Line</option>
+                <option value="bar">Bar</option>
+                <option value="number">Big Number</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Date range</label>
+            <select id="widgetRangeSelect">
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn" onclick="closeWidgetModal()">Cancel</button>
+            <button type="button" class="btn primary" onclick="submitWidgetModal()">Save Widget</button>
+        </div>
+    </div>
+</div>
+
+<!-- SCHEDULED REPORTS -->
+<div class="modal-overlay" id="reportsModalOverlay">
+    <div class="modal-card">
+        <h3>Scheduled Reports</h3>
+        <div id="reportsEmailNote"></div>
+        <div id="reportsList" class="reports-list"></div>
+        <div class="form-group">
+            <label>Send to email</label>
+            <input type="text" id="reportEmailInput" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+            <label>Frequency</label>
+            <select id="reportFrequencySelect">
+                <option value="daily">Daily</option>
+                <option value="weekly" selected>Weekly</option>
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn" onclick="closeReportsModal()">Close</button>
+            <button type="button" class="btn primary" onclick="submitAddReport()">Add Report</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const token = localStorage.getItem('hai_session_token');
+    let dashboards = [];
+    let activeDashboardId = null;
+    let editingWidgetId = null; // null = adding a new widget
+    let metricsCatalog = [];
+
+    async function authFetchJSON(url, method, body) {
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
+        return data;
+    }
+
+    function showGate(title, message) {
+        document.getElementById('gateTitle').innerText = title;
+        document.getElementById('gateMessage').innerText = message;
+        document.getElementById('gateScreen').style.display = 'flex';
+        document.getElementById('appShell').style.display = 'none';
+    }
+
+    async function init() {
+        if (!token) return showGate('Not logged in', 'Log into HAI first, then open Admin Dashboard from the menu.');
+        showGate('Checking access…', '');
+        document.getElementById('gateScreen').style.display = 'flex';
+
+        let me;
+        try {
+            me = await authFetchJSON('/api/auth/me', 'GET');
+        } catch (err) {
+            return showGate('Session expired', 'Please log back into HAI, then open Admin Dashboard again.');
+        }
+        if (!me.isAdmin) {
+            return showGate('Access denied', 'Your account does not have admin access to this dashboard.');
+        }
+
+        document.getElementById('gateScreen').style.display = 'none';
+        document.getElementById('appShell').style.display = 'flex';
+        document.getElementById('topbarUsername').innerText = '@' + me.username;
+
+        const metricsData = await authFetchJSON('/api/admin/metrics', 'GET');
+        metricsCatalog = metricsData.metrics;
+        const select = document.getElementById('widgetMetricSelect');
+        select.innerHTML = metricsCatalog.map(m => `<option value="${m.key}">${m.label}</option>`).join('');
+
+        await loadOverview();
+        setInterval(loadOverview, 30000);
+
+        await loadDashboards();
+    }
+
+    async function loadOverview() {
+        try {
+            const o = await authFetchJSON('/api/admin/overview', 'GET');
+            const cards = [
+                { label: 'Online Now', value: o.onlineNow },
+                { label: 'Total Users', value: o.totalUsers },
+                { label: 'Total Groups', value: o.totalGroups },
+                { label: 'Messages Today', value: o.messagesToday },
+                { label: 'Signups Today', value: o.signupsToday },
+                { label: 'Messages (7d)', value: o.messages7d },
+                { label: 'Signups (7d)', value: o.signups7d }
+            ];
+            document.getElementById('overviewGrid').innerHTML = cards.map(c =>
+                `<div class="overview-card"><div class="value">${c.value.toLocaleString()}</div><div class="label">${c.label}</div></div>`
+            ).join('');
+        } catch (err) { console.error('overview load failed:', err.message); }
+    }
+
+    /* DASHBOARDS */
+    async function loadDashboards() {
+        const data = await authFetchJSON('/api/admin/dashboards', 'GET');
+        dashboards = data.dashboards;
+
+        if (!dashboards.length) {
+            // First time in Admin Mode -- seed one starter dashboard so the page
+            // isn't empty on first visit.
+            const starterLayout = [
+                { id: cryptoRandomId(), title: 'Signups', metric: 'signups', chartType: 'bar', rangeDays: 30 },
+                { id: cryptoRandomId(), title: 'Messages Sent', metric: 'messages_total', chartType: 'line', rangeDays: 30 },
+                { id: cryptoRandomId(), title: 'Active Users (DAU)', metric: 'active_users', chartType: 'line', rangeDays: 30 },
+                { id: cryptoRandomId(), title: 'Logins', metric: 'logins', chartType: 'number', rangeDays: 7 }
+            ];
+            const created = await authFetchJSON('/api/admin/dashboards', 'POST', { name: 'Overview', layout: starterLayout });
+            dashboards = [{ id: created.id, name: 'Overview', layout: starterLayout }];
+        }
+
+        if (!activeDashboardId || !dashboards.some(d => d.id === activeDashboardId)) {
+            activeDashboardId = dashboards[0].id;
+        }
+        renderDashboardList();
+        renderActiveDashboard();
+    }
+
+    function cryptoRandomId() {
+        return (crypto.randomUUID ? crypto.randomUUID() : 'w-' + Math.random().toString(36).slice(2));
+    }
+
+    function currentDashboard() {
+        return dashboards.find(d => d.id === activeDashboardId);
+    }
+
+    function renderDashboardList() {
+        const container = document.getElementById('dashboardList');
+        container.innerHTML = dashboards.map(d => `
+            <div class="dash-row ${d.id === activeDashboardId ? 'active' : ''}" onclick="selectDashboard('${d.id}')">
+                <span>${d.name}</span>
+                <span class="dash-row-actions" onclick="event.stopPropagation()">
+                    <button type="button" title="Rename" onclick="renameDashboard('${d.id}')">✎</button>
+                    <button type="button" title="Delete" onclick="deleteDashboard('${d.id}')">🗑</button>
+                </span>
+            </div>
+        `).join('');
+    }
+
+    function selectDashboard(id) {
+        activeDashboardId = id;
+        renderDashboardList();
+        renderActiveDashboard();
+    }
+
+    async function createDashboard() {
+        const name = prompt('Dashboard name', 'New Dashboard');
+        if (!name || !name.trim()) return;
+        const created = await authFetchJSON('/api/admin/dashboards', 'POST', { name: name.trim(), layout: [] });
+        dashboards.push({ id: created.id, name: name.trim(), layout: [] });
+        activeDashboardId = created.id;
+        renderDashboardList();
+        renderActiveDashboard();
+    }
+
+    async function renameDashboard(id) {
+        const d = dashboards.find(x => x.id === id);
+        const name = prompt('Dashboard name', d.name);
+        if (!name || !name.trim() || name.trim() === d.name) return;
+        d.name = name.trim();
+        await authFetchJSON(`/api/admin/dashboards/${id}`, 'PATCH', { name: d.name });
+        renderDashboardList();
+        if (id === activeDashboardId) document.getElementById('activeDashboardName').innerText = d.name;
+    }
+
+    async function deleteDashboard(id) {
+        if (dashboards.length <= 1) return alert('You need at least one dashboard.');
+        if (!confirm('Delete this dashboard? This cannot be undone.')) return;
+        await authFetchJSON(`/api/admin/dashboards/${id}`, 'DELETE');
+        dashboards = dashboards.filter(d => d.id !== id);
+        if (activeDashboardId === id) activeDashboardId = dashboards[0].id;
+        renderDashboardList();
+        renderActiveDashboard();
+    }
+
+    async function persistActiveDashboardLayout() {
+        const d = currentDashboard();
+        if (!d) return;
+        await authFetchJSON(`/api/admin/dashboards/${d.id}`, 'PATCH', { layout: d.layout });
+    }
+
+    /* WIDGET GRID */
+    async function renderActiveDashboard() {
+        const d = currentDashboard();
+        if (!d) return;
+        document.getElementById('activeDashboardName').innerText = d.name;
+
+        const grid = document.getElementById('widgetGrid');
+        if (!d.layout.length) {
+            grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;">No widgets yet. Click "+ Add Widget" to build your first chart.</div>`;
+            return;
+        }
+
+        grid.innerHTML = d.layout.map(w => `
+            <div class="widget-card" draggable="true" data-widget-id="${w.id}">
+                <div class="widget-card-header">
+                    <div>
+                        <div class="widget-card-title">${w.title}</div>
+                        <div class="widget-card-sub">${metricLabel(w.metric)} · last ${w.rangeDays}d</div>
+                    </div>
+                    <div class="widget-card-actions">
+                        <button type="button" title="Export CSV" onclick="exportWidgetCsv('${w.id}')">⬇</button>
+                        <button type="button" title="Edit" onclick="openWidgetModal('${w.id}')">✎</button>
+                        <button type="button" title="Delete" onclick="deleteWidget('${w.id}')">🗑</button>
+                    </div>
+                </div>
+                <div class="widget-body" id="widget-body-${w.id}">
+                    <div style="color:var(--text-muted); font-size:12px; padding-top:20px; text-align:center;">Loading…</div>
+                </div>
+            </div>
+        `).join('');
+
+        attachDragHandlers();
+
+        for (const w of d.layout) {
+            loadAndRenderWidget(w);
+        }
+    }
+
+    function metricLabel(key) {
+        const m = metricsCatalog.find(x => x.key === key);
+        return m ? m.label : key;
+    }
+
+    async function loadAndRenderWidget(widget) {
+        const bodyEl = document.getElementById(`widget-body-${widget.id}`);
+        if (!bodyEl) return;
+        try {
+            const data = await authFetchJSON(`/api/admin/timeseries?metric=${encodeURIComponent(widget.metric)}&days=${widget.rangeDays}`, 'GET');
+            const series = data.series;
+            if (widget.chartType === 'number') {
+                const total = series.reduce((s, p) => s + p.value, 0);
+                bodyEl.innerHTML = `<div class="widget-number-value">${total.toLocaleString()}</div><div class="widget-number-sub">total over last ${widget.rangeDays} days</div>`;
+            } else {
+                bodyEl.innerHTML = `<div class="widget-canvas-wrap"><canvas></canvas></div>`;
+                const canvas = bodyEl.querySelector('canvas');
+                requestAnimationFrame(() => drawChart(canvas, series, widget.chartType));
+            }
+        } catch (err) {
+            bodyEl.innerHTML = `<div style="color:var(--accent-red); font-size:12px; padding-top:20px; text-align:center;">Failed to load</div>`;
+        }
+    }
+
+    /* LIGHTWEIGHT CANVAS CHARTS — no external chart library, consistent with the
+       rest of this self-hosted app not depending on any CDN. */
+    function drawChart(canvas, series, type) {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const w = rect.width, h = rect.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const styles = getComputedStyle(document.documentElement);
+        const accent = styles.getPropertyValue('--accent').trim() || '#4a9ad9';
+        const gridColor = styles.getPropertyValue('--border').trim() || '#e2e2e2';
+        const mutedColor = styles.getPropertyValue('--text-muted').trim() || '#888';
+
+        const values = series.map(p => p.value);
+        const max = Math.max(1, ...values);
+        const padding = { top: 6, right: 6, bottom: 18, left: 6 };
+        const chartW = w - padding.left - padding.right;
+        const chartH = h - padding.top - padding.bottom;
+
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 2; i++) {
+            const y = padding.top + chartH * (i / 2);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + chartW, y); ctx.stroke();
+        }
+
+        if (type === 'bar') {
+            const gap = chartW / values.length;
+            const barWidth = Math.max(2, gap * 0.6);
+            ctx.fillStyle = accent;
+            values.forEach((v, i) => {
+                const barH = (v / max) * chartH;
+                const x = padding.left + i * gap + (gap - barWidth) / 2;
+                const y = padding.top + chartH - barH;
+                ctx.fillRect(x, y, barWidth, Math.max(barH, 1));
+            });
+        } else {
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            values.forEach((v, i) => {
+                const x = padding.left + (i / (values.length - 1 || 1)) * chartW;
+                const y = padding.top + chartH - (v / max) * chartH;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            ctx.lineTo(padding.left + chartW, padding.top + chartH);
+            ctx.lineTo(padding.left, padding.top + chartH);
+            ctx.closePath();
+            ctx.fillStyle = accent + '22';
+            ctx.fill();
+
+            const lastY = padding.top + chartH - (values[values.length - 1] / max) * chartH;
+            ctx.fillStyle = accent;
+            ctx.beginPath(); ctx.arc(padding.left + chartW, lastY, 3, 0, Math.PI * 2); ctx.fill();
+        }
+
+        ctx.fillStyle = mutedColor;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(series[0].date.slice(5), padding.left, h - 4);
+        ctx.textAlign = 'right';
+        ctx.fillText(series[series.length - 1].date.slice(5), padding.left + chartW, h - 4);
+    }
+
+    /* DRAG-REORDER — plain HTML5 drag and drop, no library. */
+    let dragSourceId = null;
+    function attachDragHandlers() {
+        document.querySelectorAll('.widget-card').forEach(card => {
+            card.addEventListener('dragstart', (e) => {
+                dragSourceId = card.dataset.widgetId;
+                card.classList.add('dragging');
+            });
+            card.addEventListener('dragend', () => card.classList.remove('dragging'));
+            card.addEventListener('dragover', (e) => e.preventDefault());
+            card.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const targetId = card.dataset.widgetId;
+                if (!dragSourceId || dragSourceId === targetId) return;
+                const d = currentDashboard();
+                const fromIdx = d.layout.findIndex(w => w.id === dragSourceId);
+                const toIdx = d.layout.findIndex(w => w.id === targetId);
+                if (fromIdx === -1 || toIdx === -1) return;
+                const [moved] = d.layout.splice(fromIdx, 1);
+                d.layout.splice(toIdx, 0, moved);
+                renderActiveDashboard();
+                persistActiveDashboardLayout();
+            });
+        });
+    }
+
+    /* ADD/EDIT WIDGET MODAL */
+    function openWidgetModal(widgetId) {
+        editingWidgetId = widgetId || null;
+        const d = currentDashboard();
+        const widget = widgetId ? d.layout.find(w => w.id === widgetId) : null;
+        document.getElementById('widgetModalHeading').innerText = widget ? 'Edit Widget' : 'Add Widget';
+        document.getElementById('widgetTitleInput').value = widget ? widget.title : '';
+        document.getElementById('widgetMetricSelect').value = widget ? widget.metric : (metricsCatalog[0] || {}).key || '';
+        document.getElementById('widgetChartTypeSelect').value = widget ? widget.chartType : 'line';
+        document.getElementById('widgetRangeSelect').value = widget ? String(widget.rangeDays) : '30';
+        document.getElementById('widgetModalOverlay').classList.add('open');
+    }
+    function closeWidgetModal() {
+        document.getElementById('widgetModalOverlay').classList.remove('open');
+    }
+    async function submitWidgetModal() {
+        const d = currentDashboard();
+        const metric = document.getElementById('widgetMetricSelect').value;
+        const title = document.getElementById('widgetTitleInput').value.trim() || metricLabel(metric);
+        const chartType = document.getElementById('widgetChartTypeSelect').value;
+        const rangeDays = parseInt(document.getElementById('widgetRangeSelect').value, 10);
+
+        if (editingWidgetId) {
+            const widget = d.layout.find(w => w.id === editingWidgetId);
+            Object.assign(widget, { title, metric, chartType, rangeDays });
+        } else {
+            d.layout.push({ id: cryptoRandomId(), title, metric, chartType, rangeDays });
+        }
+        closeWidgetModal();
+        renderActiveDashboard();
+        await persistActiveDashboardLayout();
+    }
+    async function deleteWidget(widgetId) {
+        if (!confirm('Remove this widget?')) return;
+        const d = currentDashboard();
+        d.layout = d.layout.filter(w => w.id !== widgetId);
+        renderActiveDashboard();
+        await persistActiveDashboardLayout();
+    }
+    async function exportWidgetCsv(widgetId) {
+        const d = currentDashboard();
+        const widget = d.layout.find(w => w.id === widgetId);
+        if (!widget) return;
+        try {
+            const res = await fetch(`/api/admin/export?metric=${encodeURIComponent(widget.metric)}&days=${widget.rangeDays}`, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!res.ok) throw new Error('Export failed');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${widget.metric}_${widget.rangeDays}d.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert('Could not export CSV: ' + err.message);
+        }
+    }
+
+    /* SCHEDULED REPORTS */
+    async function openReportsModal() {
+        document.getElementById('reportsModalOverlay').classList.add('open');
+        await renderReportsList();
+    }
+    function closeReportsModal() {
+        document.getElementById('reportsModalOverlay').classList.remove('open');
+    }
+    async function renderReportsList() {
+        const data = await authFetchJSON('/api/admin/reports', 'GET');
+        const d = currentDashboard();
+        const forThisDashboard = data.reports.filter(r => r.dashboardId === d.id);
+
+        document.getElementById('reportsEmailNote').innerHTML = data.emailEnabled
+            ? ''
+            : `<div class="note-banner">Email delivery isn't configured on the server yet -- reports will save but won't send until it is.</div>`;
+
+        document.getElementById('reportsList').innerHTML = forThisDashboard.length
+            ? forThisDashboard.map(r => `
+                <div class="report-row">
+                    <div>
+                        <div class="report-row-email">${r.email}</div>
+                        <div class="report-row-meta">${r.frequency} · ${r.lastSentAt ? 'last sent ' + new Date(r.lastSentAt).toLocaleDateString() : 'not sent yet'}</div>
+                    </div>
+                    <button type="button" class="btn small danger" onclick="deleteReport('${r.id}')">Remove</button>
+                </div>
+            `).join('')
+            : `<div style="font-size:12px; color:var(--text-muted);">No scheduled reports for this dashboard yet.</div>`;
+    }
+    async function submitAddReport() {
+        const email = document.getElementById('reportEmailInput').value.trim();
+        const frequency = document.getElementById('reportFrequencySelect').value;
+        if (!email) return alert('Enter an email address.');
+        const d = currentDashboard();
+        try {
+            await authFetchJSON('/api/admin/reports', 'POST', { dashboardId: d.id, email, frequency });
+            document.getElementById('reportEmailInput').value = '';
+            await renderReportsList();
+        } catch (err) {
+            alert(err.message);
+        }
+    }
+    async function deleteReport(id) {
+        await authFetchJSON(`/api/admin/reports/${id}`, 'DELETE');
+        await renderReportsList();
+    }
+
+    init();
+</script>
+</body>
+</html>

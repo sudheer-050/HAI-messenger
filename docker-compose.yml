@@ -28,6 +28,7 @@ services:
 
   backend:
     build: ./backend
+    restart: unless-stopped   # AI Mode restarts this process after applying a server.js edit -- needs Docker to bring it straight back up
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -39,8 +40,11 @@ services:
       - REDIS_URL=redis://redis:6379
       - TRANSLATE_URL=http://libretranslate:5000
       - OLLAMA_URL=http://host.docker.internal:11434
-      - BASIC_AUTH_USER=${BASIC_AUTH_USER}
-      - BASIC_AUTH_PASS=${BASIC_AUTH_PASS}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -49,7 +53,9 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate --url http://backend:3000
+    command: tunnel --no-autoupdate run
+    volumes:
+      - ./cloudflared:/home/nonroot/.cloudflared
     depends_on:
       - backend
 

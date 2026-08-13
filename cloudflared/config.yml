@@ -1,0 +1,7 @@
+tunnel: 0ee9d91e-2b1e-4a79-9d16-4a9dd524b40b
+credentials-file: /home/nonroot/.cloudflared/0ee9d91e-2b1e-4a79-9d16-4a9dd524b40b.json
+
+ingress:
+  - hostname: myhai.org
+    service: http://backend:3000
+  - service: http_status:404

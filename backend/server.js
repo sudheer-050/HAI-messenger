@@ -1,182 +1,1239 @@
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
+const fsp = require('fs/promises');
+const { spawn } = require('child_process');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { createClient } = require('redis');
-
-// Gate on every request — the app + Socket.IO handshake alike — so the tunnel link
-// alone isn't the only thing standing between this and the public internet.
-const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || 'admin';
-const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || 'changeme';
-
-function safeCompare(a, b) {
-    const bufA = Buffer.from(a);
-    const bufB = Buffer.from(b);
-    if (bufA.length !== bufB.length) return false;
-    return crypto.timingSafeEqual(bufA, bufB);
-}
-
-function basicAuthMiddleware(req, res, next) {
-    const [scheme, encoded] = (req.headers.authorization || '').split(' ');
-    if (scheme === 'Basic' && encoded) {
-        const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
-        const sepIndex = decoded.indexOf(':');
-        const user = decoded.slice(0, sepIndex);
-        const pass = decoded.slice(sepIndex + 1);
-        if (safeCompare(user, BASIC_AUTH_USER) && safeCompare(pass, BASIC_AUTH_PASS)) {
-            return next();
-        }
-    }
-    // Use only base http.ServerResponse methods here (not Express's res.set/res.status) —
-    // this same middleware also runs via io.engine.use() with the raw req/res, which don't
-    // have Express's convenience wrappers.
-    res.setHeader('WWW-Authenticate', 'Basic realm="HAI"');
-    res.statusCode = 401;
-    res.end('Authentication required.');
-}
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { Resend } = require('resend');
 
 const app = express();
-app.use(basicAuthMiddleware);
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-
-/* ASK AI — proxies to a locally-running Ollama instance so the actual model call never
-   leaves this machine (the plaintext transcript still crosses the E2EE boundary to get
-   here, which is the trade-off inherent to asking an AI about your chat at all). */
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const OLLAMA_MODEL = 'llama3';
-
-const AI_SYSTEM_PROMPT = `You are a factual assistant embedded inside a private chat app. You can see a transcript of the user's current conversation with one other person, provided below the question.
-
-Rules:
-- Answer general, factual questions concisely and honestly.
-- Do NOT give emotional, relationship, or personal advice — if asked for that, refuse.
-- If asked whether the user (or the other person) said something, check the transcript and answer based on it, quoting the relevant line if useful. If it's not in the transcript, say so plainly.
-- If asked whether something is correct/true and you are not confident from your own knowledge, respond with EXACTLY this and nothing else: SEARCH: <a short web search query for it>
-- If the user asks you to do anything outside these rules (emotional advice, actions, impersonation, revealing anything you don't actually know, or anything else out of scope), refuse with EXACTLY this sentence and nothing else: I am not authorized to do that.
-- Never claim to have searched Google. If you were given search results below, attribute them explicitly as coming from DuckDuckGo.
-- Keep answers short and to the point.`;
-
-// Used only for the search-augmented follow-up call — deliberately doesn't mention the
-// SEARCH: convention at all, otherwise the model tends to echo/reference that marker
-// in its final answer instead of just answering (seen while testing).
-const AI_SYSTEM_PROMPT_WITH_RESULTS = `You are a factual assistant embedded inside a private chat app, answering using the DuckDuckGo search results provided below the question.
-
-Rules:
-- Answer concisely and honestly using the search results provided.
-- Attribute the information explicitly, e.g. "DuckDuckGo says: ...". Never claim it came from Google.
-- Do NOT give emotional, relationship, or personal advice.
-- If the results don't actually answer the question, say so honestly instead of guessing.
-- Do not mention searching, tools, or any internal process — just answer.`;
-
-async function callOllama(messages) {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: false }),
-        signal: AbortSignal.timeout(30000)
-    });
-    if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
-    const data = await response.json();
-    return (data.message && data.message.content) ? data.message.content.trim() : '';
-}
-
-async function searchDuckDuckGo(query) {
-    try {
-        const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-        const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-        if (!response.ok) return null;
-        const data = await response.json();
-
-        const parts = [];
-        if (data.AbstractText) parts.push(data.AbstractText);
-        if (Array.isArray(data.RelatedTopics)) {
-            for (const topic of data.RelatedTopics) {
-                if (parts.length >= 3) break;
-                if (topic.Text) parts.push(topic.Text);
-            }
+app.use(express.json({ limit: '25mb' })); // encrypted email backups can be several MB base64-encoded
+app.use(express.static(path.join(__dirname, 'public'), {
+    // index.html is a single always-changing file during active development -- a
+    // browser silently serving a stale cached copy after an edit (instead of a normal
+    // refresh picking up the new one) has repeatedly looked identical to "the fix
+    // didn't work" from the user's side. Force it to always revalidate; other static
+    // assets (icons etc.) keep default caching since they don't change as often.
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-store, must-revalidate');
         }
-        return parts.length ? parts.join('\n') : null;
-    } catch (err) {
-        console.error('DuckDuckGo search failed:', err.message);
-        return null;
     }
-}
+}));
 
-// A local model this size doesn't reliably follow "refuse with exactly this sentence"
-// buried in a system prompt — it tends to comply-then-help-anyway (confirmed while
-// testing: it said the refusal line, then gave the advice regardless). This keyword
-// guard makes the refusal deterministic for the clearest cases instead of hoping the
-// model listens; the system prompt is left in place as a second layer for the rest.
-const EMOTIONAL_ADVICE_PATTERN = /\b(feel(ing)?s?\s+(sad|down|depress|anxious|lonely|hurt|upset)|depress(ed|ion)|anxiety|heartbrok|breakup|break[\s-]?up|relationship advice|should i (forgive|break up|leave|divorce)|(my|our) (relationship|marriage|boyfriend|girlfriend|husband|wife|partner))\b/i;
+/* REAL ACCOUNTS — Postgres-backed users, bcrypt-hashed passwords, email verification
+   via Resend before an account can be created. JWT session tokens are issued on
+   successful login/signup and are the only thing register_user trusts for identity. */
+const JWT_SECRET = process.env.JWT_SECRET;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
-// "Is this correct/true" style verification questions should always search rather than
-// hope the model asks for it — testing showed llama3 often just answers "I don't know"
-// or guesses from training data instead of requesting a lookup, even when it clearly
-// should. This makes the search step deterministic for exactly the phrasing the
-// feature was asked for; the SEARCH: marker below still covers everything else.
-const VERIFICATION_QUESTION_PATTERN = /\b(is (it|this|that) (true|correct|accurate|right)|is (that|this) correct|fact[\s-]?check|verify (that|this)|(current|latest|today'?s|recent) (news|price|weather|population|score|result|version))\b/i;
-
-app.post('/api/ai/ask', async (req, res) => {
-    const { question, transcript } = req.body || {};
-    if (!question || typeof question !== 'string') {
-        return res.status(400).json({ error: 'question is required' });
-    }
-
-    if (EMOTIONAL_ADVICE_PATTERN.test(question)) {
-        return res.json({ answer: 'I am not authorized to do that.' });
-    }
-
-    const transcriptText = Array.isArray(transcript)
-        ? transcript.map(m => `${m.sender}: ${m.text}`).join('\n')
-        : '';
-
-    const baseMessages = [
-        { role: 'system', content: AI_SYSTEM_PROMPT },
-        { role: 'user', content: `Conversation transcript:\n${transcriptText || '(no messages yet)'}\n\nQuestion: ${question}` }
-    ];
-
-    async function answerWithSearch(query) {
-        const results = await searchDuckDuckGo(query);
-        const messages = [
-            { role: 'system', content: AI_SYSTEM_PROMPT_WITH_RESULTS },
-            {
-                role: 'user',
-                content: results
-                    ? `Conversation transcript:\n${transcriptText || '(no messages yet)'}\n\nQuestion: ${question}\n\nDuckDuckGo search results for "${query}":\n${results}`
-                    : `Conversation transcript:\n${transcriptText || '(no messages yet)'}\n\nQuestion: ${question}\n\nA search for "${query}" returned no results. Tell the user you couldn't find current information on this and answer from what you already know, noting the uncertainty.`
-            }
-        ];
-        return callOllama(messages);
-    }
-
-    let answer;
-    try {
-        if (VERIFICATION_QUESTION_PATTERN.test(question)) {
-            answer = await answerWithSearch(question);
-        } else {
-            answer = await callOllama(baseMessages);
-        }
-    } catch (err) {
-        console.error('Ollama call failed:', err.message);
-        return res.status(502).json({ error: "AI assistant isn't reachable — make sure Ollama is running." });
-    }
-
-    // The model asks for a web lookup by replying with just this marker instead of an
-    // answer — a lightweight, non-native alternative to real tool-calling that works
-    // with any Ollama model regardless of tool-use support.
-    const searchMatch = answer.match(/^SEARCH:\s*(.+)$/i);
-    if (searchMatch) {
+const pgPool = new Pool({ connectionString: process.env.DATABASE_URL });
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(20) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        first_name VARCHAR(100),
+        last_name VARCHAR(100),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_visible BOOLEAN NOT NULL DEFAULT true;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+`).then(async () => {
+    console.log('🐘 Postgres users table ready');
+    // One-time bootstrap: promote whoever's listed in ADMIN_USERNAMES (comma-separated)
+    // to admin on every startup, so granting/revoking dashboard access is just an env
+    // var + restart rather than a manual SQL command.
+    const adminUsernames = (process.env.ADMIN_USERNAMES || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (adminUsernames.length) {
         try {
-            answer = await answerWithSearch(searchMatch[1].trim());
+            await pgPool.query('UPDATE users SET is_admin = true WHERE username = ANY($1)', [adminUsernames]);
+            console.log(`👑 Admin access granted to: ${adminUsernames.join(', ')}`);
         } catch (err) {
-            console.error('Ollama follow-up call failed:', err.message);
-            return res.status(502).json({ error: "AI assistant isn't reachable — make sure Ollama is running." });
+            console.error('Admin bootstrap failed:', err.message);
         }
     }
+}).catch(err => console.error('Postgres init failed:', err.message));
 
-    res.json({ answer });
+/* ANALYTICS — lightweight metadata-only event log (never message content, which
+   the server never sees anyway thanks to E2E encryption) that powers the admin
+   dashboard. Every INSERT is fire-and-forget from the caller's perspective: a
+   failure here should never break the real feature that triggered it. */
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS analytics_events (
+        id BIGSERIAL PRIMARY KEY,
+        event_type VARCHAR(40) NOT NULL,
+        username VARCHAR(20),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS analytics_events_type_time_idx ON analytics_events (event_type, created_at);
+
+    CREATE TABLE IF NOT EXISTS admin_dashboards (
+        id VARCHAR(36) PRIMARY KEY,
+        created_by VARCHAR(20) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        layout JSONB NOT NULL DEFAULT '[]',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS admin_dashboards_created_by_idx ON admin_dashboards (created_by);
+
+    CREATE TABLE IF NOT EXISTS admin_scheduled_reports (
+        id VARCHAR(36) PRIMARY KEY,
+        dashboard_id VARCHAR(36) NOT NULL REFERENCES admin_dashboards(id) ON DELETE CASCADE,
+        created_by VARCHAR(20) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        frequency VARCHAR(10) NOT NULL DEFAULT 'weekly',
+        last_sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+`).then(() => console.log('📊 Postgres analytics tables ready')).catch(err => console.error('Postgres analytics init failed:', err.message));
+
+// Fire-and-forget metadata-only event log -- never awaited by the caller's own
+// success path, so a logging failure can't take down the feature that called it.
+function logAnalyticsEvent(eventType, username) {
+    pgPool.query('INSERT INTO analytics_events (event_type, username) VALUES ($1, $2)', [eventType, username || null])
+        .catch(err => console.error(`analytics log failed (${eventType}):`, err.message));
+}
+
+// Same posture as requireAuth, plus an is_admin check against Postgres (admin
+// panel traffic is low-volume, so a query per request is fine -- no need to cache
+// this in Redis/JWT the way presence data is).
+async function requireAdmin(req, res, next) {
+    try {
+        const result = await pgPool.query('SELECT is_admin FROM users WHERE username = $1', [req.username]);
+        if (!result.rows.length || !result.rows[0].is_admin) {
+            return res.status(403).json({ error: 'Admin access required.' });
+        }
+        next();
+    } catch (err) {
+        console.error('requireAdmin check failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+}
+
+/* FRIENDS — messaging is gated behind an accepted friend request (see send_private_message
+   below). Friendships are stored as one canonical row per pair (user_a < user_b
+   alphabetically) so there's never a duplicate/reversed row to reconcile. */
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS friend_requests (
+        id SERIAL PRIMARY KEY,
+        from_user VARCHAR(20) NOT NULL,
+        to_user VARCHAR(20) NOT NULL,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        responded_at TIMESTAMPTZ,
+        note VARCHAR(300)
+    );
+    ALTER TABLE friend_requests ADD COLUMN IF NOT EXISTS note VARCHAR(300);
+    CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_pending_pair_idx
+        ON friend_requests (from_user, to_user) WHERE status = 'pending';
+    CREATE INDEX IF NOT EXISTS friend_requests_to_user_idx ON friend_requests (to_user, status);
+    CREATE INDEX IF NOT EXISTS friend_requests_from_user_idx ON friend_requests (from_user, status);
+
+    CREATE TABLE IF NOT EXISTS friendships (
+        user_a VARCHAR(20) NOT NULL,
+        user_b VARCHAR(20) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_a, user_b)
+    );
+`).then(() => console.log('🤝 Postgres friends tables ready')).catch(err => console.error('Postgres friends init failed:', err.message));
+
+/* GROUPS — membership/roles/permissions live here in Postgres (the only place any
+   server-side "who's in this conversation" state exists), but message CONTENT never
+   does: exactly like 1:1 chat, the server only ever relays already-encrypted
+   payloads and never stores them. A group message is encrypted once per current
+   member (client-side, reusing the same RSA-OAEP+AES-GCM envelope as a 1:1 message)
+   and fanned out -- see send_group_message below -- rather than using a shared
+   group key, so this reuses the exact crypto/relay/offline-queue machinery 1:1
+   chat already has instead of a separate protocol. */
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS groups (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        avatar TEXT,
+        created_by VARCHAR(20) NOT NULL,
+        only_admins_can_send BOOLEAN NOT NULL DEFAULT false,
+        only_admins_can_manage BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS group_members (
+        group_id VARCHAR(36) NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        username VARCHAR(20) NOT NULL,
+        role VARCHAR(10) NOT NULL DEFAULT 'member',
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (group_id, username)
+    );
+    CREATE INDEX IF NOT EXISTS group_members_username_idx ON group_members (username);
+    CREATE TABLE IF NOT EXISTS group_invites (
+        code VARCHAR(24) PRIMARY KEY,
+        group_id VARCHAR(36) NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        created_by VARCHAR(20) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ,
+        revoked BOOLEAN NOT NULL DEFAULT false
+    );
+`).then(() => console.log('👥 Postgres groups tables ready')).catch(err => console.error('Postgres groups init failed:', err.message));
+
+async function getGroupMembers(groupId) {
+    const r = await pgPool.query('SELECT username, role FROM group_members WHERE group_id = $1 ORDER BY joined_at ASC', [groupId]);
+    return r.rows;
+}
+// null if not a member, otherwise their role ('member' | 'admin').
+async function getGroupRole(groupId, username) {
+    const r = await pgPool.query('SELECT role FROM group_members WHERE group_id = $1 AND username = $2', [groupId, username]);
+    return r.rows.length ? r.rows[0].role : null;
+}
+async function getGroupOrNull(groupId) {
+    const r = await pgPool.query('SELECT * FROM groups WHERE id = $1', [groupId]);
+    return r.rows.length ? r.rows[0] : null;
+}
+// Every endpoint that returns a group hands back this same camelCase shape --
+// callers never see the raw snake_case Postgres row.
+function serializeGroup(row) {
+    if (!row) return null;
+    return {
+        id: row.id, name: row.name, avatar: row.avatar, createdBy: row.created_by,
+        onlyAdminsCanSend: row.only_admins_can_send, onlyAdminsCanManage: row.only_admins_can_manage,
+        createdAt: row.created_at
+    };
+}
+
+function friendPairKey(a, b) {
+    return a < b ? [a, b] : [b, a];
+}
+
+async function areFriends(a, b) {
+    const [userA, userB] = friendPairKey(a, b);
+    const result = await pgPool.query('SELECT 1 FROM friendships WHERE user_a = $1 AND user_b = $2', [userA, userB]);
+    return result.rows.length > 0;
+}
+
+// Verifies the Bearer token on REST calls that need a real logged-in user
+// (as opposed to the public signup/login endpoints themselves).
+function requireAuth(req, res, next) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: 'Not authenticated.' });
+    try {
+        req.username = jwt.verify(token, JWT_SECRET).username;
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Session expired or invalid. Please log in again.' });
+    }
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,20}$/;
+const PENDING_SIGNUP_TTL = 60 * 15; // 15 minutes
+const SIGNUP_RATE_LIMIT = 3;
+const SIGNUP_RATE_WINDOW = 60 * 10; // 10 minutes
+const LOGIN_RATE_LIMIT = 8;
+const LOGIN_RATE_WINDOW = 60 * 10;
+
+function signSessionToken(username) {
+    return jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+function generateSixDigitCode() {
+    return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+async function checkAndBumpRateLimit(key, limit, windowSeconds) {
+    const count = await redisClient.incr(key);
+    if (count === 1) await redisClient.expire(key, windowSeconds);
+    return count <= limit;
+}
+
+app.post('/api/auth/signup/start', async (req, res) => {
+    const { firstName, lastName, email, password } = req.body || {};
+    if (!firstName || !lastName || !email || !password) {
+        return res.status(400).json({ error: 'All fields are required.' });
+    }
+    if (!EMAIL_PATTERN.test(email)) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const withinLimit = await checkAndBumpRateLimit(`ratelimit:signup:${normalizedEmail}`, SIGNUP_RATE_LIMIT, SIGNUP_RATE_WINDOW);
+    if (!withinLimit) {
+        return res.status(429).json({ error: 'Too many verification requests. Please try again later.' });
+    }
+
+    try {
+        const existing = await pgPool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+        if (existing.rows.length) {
+            return res.status(409).json({ error: 'An account with this email already exists.' });
+        }
+
+        const code = generateSixDigitCode();
+        const [passwordHash, codeHash] = await Promise.all([
+            bcrypt.hash(password, 10),
+            bcrypt.hash(code, 10)
+        ]);
+
+        await redisClient.set(`pending_signup:${normalizedEmail}`, JSON.stringify({
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            email: normalizedEmail,
+            passwordHash,
+            codeHash,
+            attempts: 0,
+            verified: false
+        }), { EX: PENDING_SIGNUP_TTL });
+
+        if (resend) {
+            await resend.emails.send({
+                from: 'HAI <noreply@myhai.org>',
+                to: normalizedEmail,
+                subject: 'Your HAI verification code',
+                text: `Your HAI verification code is: ${code}\n\nThis code expires in 15 minutes.`
+            });
+        } else {
+            console.warn('RESEND_API_KEY not set — verification email not sent. Code:', code);
+        }
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('signup/start failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/auth/signup/verify', async (req, res) => {
+    const { email, code } = req.body || {};
+    if (!email || !code) {
+        return res.status(400).json({ error: 'Email and code are required.' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+
+    try {
+        const pendingKey = `pending_signup:${normalizedEmail}`;
+        const raw = await redisClient.get(pendingKey);
+        if (!raw) {
+            return res.status(400).json({ error: 'Verification session expired. Please sign up again.' });
+        }
+        const pending = JSON.parse(raw);
+
+        if (pending.attempts >= 5) {
+            await redisClient.del(pendingKey);
+            return res.status(429).json({ error: 'Too many incorrect attempts. Please sign up again.' });
+        }
+
+        const matches = await bcrypt.compare(String(code), pending.codeHash);
+        if (!matches) {
+            pending.attempts += 1;
+            const ttl = await redisClient.ttl(pendingKey);
+            await redisClient.set(pendingKey, JSON.stringify(pending), { EX: ttl > 0 ? ttl : PENDING_SIGNUP_TTL });
+            return res.status(400).json({ error: 'Incorrect code. Please try again.' });
+        }
+
+        pending.verified = true;
+        const ttl = await redisClient.ttl(pendingKey);
+        await redisClient.set(pendingKey, JSON.stringify(pending), { EX: ttl > 0 ? ttl : PENDING_SIGNUP_TTL });
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('signup/verify failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/auth/signup/complete', async (req, res) => {
+    const { email, username } = req.body || {};
+    if (!email || !username) {
+        return res.status(400).json({ error: 'Email and username are required.' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (!USERNAME_PATTERN.test(normalizedUsername)) {
+        return res.status(400).json({ error: 'Username must be 3-20 alphanumeric characters or underscores.' });
+    }
+
+    try {
+        const pendingKey = `pending_signup:${normalizedEmail}`;
+        const raw = await redisClient.get(pendingKey);
+        if (!raw) {
+            return res.status(400).json({ error: 'Verification session expired. Please sign up again.' });
+        }
+        const pending = JSON.parse(raw);
+        if (!pending.verified) {
+            return res.status(400).json({ error: 'Email not verified yet.' });
+        }
+
+        const existingUsername = await pgPool.query('SELECT id FROM users WHERE username = $1', [normalizedUsername]);
+        if (existingUsername.rows.length) {
+            return res.status(409).json({ error: 'This username is already taken.' });
+        }
+
+        await pgPool.query(
+            'INSERT INTO users (username, email, password_hash, first_name, last_name) VALUES ($1, $2, $3, $4, $5)',
+            [normalizedUsername, normalizedEmail, pending.passwordHash, pending.firstName, pending.lastName]
+        );
+        await redisClient.del(pendingKey);
+
+        const token = signSessionToken(normalizedUsername);
+        logAnalyticsEvent('signup', normalizedUsername);
+        res.json({ ok: true, token, username: normalizedUsername });
+    } catch (err) {
+        console.error('signup/complete failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    const { identity, password } = req.body || {};
+    if (!identity || !password) {
+        return res.status(400).json({ error: 'Please enter your username/email and password.' });
+    }
+    const normalizedIdentity = identity.trim().toLowerCase();
+
+    const withinLimit = await checkAndBumpRateLimit(`ratelimit:login:${normalizedIdentity}`, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW);
+    if (!withinLimit) {
+        return res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    }
+
+    const GENERIC_ERROR = { error: 'Incorrect username/email or password.' };
+
+    try {
+        const result = await pgPool.query(
+            'SELECT username, password_hash, must_change_password FROM users WHERE username = $1 OR email = $1',
+            [normalizedIdentity]
+        );
+        if (!result.rows.length) {
+            return res.status(401).json(GENERIC_ERROR);
+        }
+        const user = result.rows[0];
+        const matches = await bcrypt.compare(password, user.password_hash);
+        if (!matches) {
+            return res.status(401).json(GENERIC_ERROR);
+        }
+
+        const token = signSessionToken(user.username);
+        logAnalyticsEvent('login', user.username);
+        res.json({ ok: true, token, username: user.username, mustChangePassword: !!user.must_change_password });
+    } catch (err) {
+        console.error('login failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+const FORGOT_PASSWORD_RATE_LIMIT = 3;
+const FORGOT_PASSWORD_RATE_WINDOW = 60 * 60; // 1 hour
+const TEMP_PASSWORD_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'; // no 0/O/1/l/I — easy to type off a phone screen
+
+function generateTemporaryPassword(length = 12) {
+    let out = '';
+    for (let i = 0; i < length; i++) {
+        out += TEMP_PASSWORD_CHARSET[crypto.randomInt(0, TEMP_PASSWORD_CHARSET.length)];
+    }
+    return out;
+}
+
+// Always responds with the same generic message whether or not the account exists —
+// only the presence/absence of the email (and whatever the attacker infers from
+// response timing) could leak that, so the account lookup and email send both happen
+// unconditionally behind that same generic response.
+app.post('/api/auth/forgot-password', async (req, res) => {
+    const { identity } = req.body || {};
+    if (!identity || typeof identity !== 'string') {
+        return res.status(400).json({ error: 'Please enter your username or email.' });
+    }
+    const normalizedIdentity = identity.trim().toLowerCase();
+    const GENERIC_RESPONSE = { ok: true, message: 'If an account exists for that username or email, we\'ve sent a temporary password to the email on file.' };
+
+    const withinLimit = await checkAndBumpRateLimit(`ratelimit:forgot:${normalizedIdentity}`, FORGOT_PASSWORD_RATE_LIMIT, FORGOT_PASSWORD_RATE_WINDOW);
+    if (!withinLimit) {
+        // Still generic — a "too many requests" specifically for this identity would
+        // itself confirm the account exists, so this only differs in status code.
+        return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+    }
+
+    try {
+        const result = await pgPool.query(
+            'SELECT id, username, email FROM users WHERE username = $1 OR email = $1',
+            [normalizedIdentity]
+        );
+        if (!result.rows.length) {
+            return res.json(GENERIC_RESPONSE);
+        }
+        const user = result.rows[0];
+
+        const tempPassword = generateTemporaryPassword();
+        const tempHash = await bcrypt.hash(tempPassword, 10);
+        await pgPool.query(
+            'UPDATE users SET password_hash = $1, must_change_password = true WHERE id = $2',
+            [tempHash, user.id]
+        );
+
+        if (resend) {
+            await resend.emails.send({
+                from: 'HAI <noreply@myhai.org>',
+                to: user.email,
+                subject: 'Your HAI temporary password',
+                text: `Someone (hopefully you) requested a password reset for @${user.username}.\n\nYour temporary password is: ${tempPassword}\n\nLog in with it, then you'll be asked to set a new password right away. If you didn't request this, consider changing your password once you're able to log in.`
+            });
+        } else {
+            console.warn('RESEND_API_KEY not set — password reset email not sent. Temp password:', tempPassword);
+        }
+
+        res.json(GENERIC_RESPONSE);
+    } catch (err) {
+        console.error('forgot-password failed:', err.message);
+        // Still generic on failure — a distinguishable error would leak existence too.
+        res.json(GENERIC_RESPONSE);
+    }
+});
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+    try {
+        const result = await pgPool.query(
+            'SELECT username, email, first_name, last_name, last_seen_visible, is_admin FROM users WHERE username = $1',
+            [req.username]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Account not found.' });
+        const user = result.rows[0];
+        res.json({
+            username: user.username,
+            email: user.email,
+            firstName: user.first_name,
+            lastName: user.last_name,
+            lastSeenVisible: user.last_seen_visible,
+            isAdmin: user.is_admin
+        });
+    } catch (err) {
+        console.error('me failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'Current and new password are required.' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+        return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    }
+
+    try {
+        const result = await pgPool.query('SELECT password_hash FROM users WHERE username = $1', [req.username]);
+        if (!result.rows.length) return res.status(404).json({ error: 'Account not found.' });
+
+        const matches = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+        if (!matches) return res.status(401).json({ error: 'Current password is incorrect.' });
+
+        const newHash = await bcrypt.hash(newPassword, 10);
+        await pgPool.query('UPDATE users SET password_hash = $1, must_change_password = false WHERE username = $2', [newHash, req.username]);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('change-password failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/auth/delete-account', requireAuth, async (req, res) => {
+    const { password } = req.body || {};
+    if (!password) return res.status(400).json({ error: 'Password is required to delete your account.' });
+
+    try {
+        const result = await pgPool.query('SELECT password_hash FROM users WHERE username = $1', [req.username]);
+        if (!result.rows.length) return res.status(404).json({ error: 'Account not found.' });
+
+        const matches = await bcrypt.compare(password, result.rows[0].password_hash);
+        if (!matches) return res.status(401).json({ error: 'Incorrect password.' });
+
+        await pgPool.query('DELETE FROM users WHERE username = $1', [req.username]);
+
+        const keys = await redisClient.keys(`user:${req.username}:*`);
+        if (keys.length) await redisClient.del(keys);
+        await redisClient.sRem('online_users', req.username);
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('delete-account failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.patch('/api/auth/settings', requireAuth, async (req, res) => {
+    const { lastSeenVisible } = req.body || {};
+    if (typeof lastSeenVisible !== 'boolean') {
+        return res.status(400).json({ error: 'lastSeenVisible must be true or false.' });
+    }
+
+    try {
+        await pgPool.query('UPDATE users SET last_seen_visible = $1 WHERE username = $2', [lastSeenVisible, req.username]);
+        await redisClient.set(`user:${req.username}:lastSeenVisible`, lastSeenVisible ? 'true' : 'false');
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('settings update failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.patch('/api/auth/profile', requireAuth, async (req, res) => {
+    const { firstName, lastName } = req.body || {};
+    if (!firstName || !lastName || typeof firstName !== 'string' || typeof lastName !== 'string') {
+        return res.status(400).json({ error: 'First and last name are required.' });
+    }
+    try {
+        await pgPool.query('UPDATE users SET first_name = $1, last_name = $2 WHERE username = $3', [firstName.trim(), lastName.trim(), req.username]);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('profile update failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+/* FRIEND REQUESTS — REST rather than sockets so the flow works the same whether or not
+   the caller is currently connected; real-time pushes to the other party (when they're
+   online) are layered on top via the socket registry populated in register_user below. */
+async function pushToUserSocket(username, event, payload) {
+    try {
+        const socketId = await redisClient.get(`user:${username}:socket`);
+        if (socketId) io.to(socketId).emit(event, payload);
+    } catch (err) {
+        console.error(`pushToUserSocket(${event}) failed:`, err.message);
+    }
+}
+
+// Lets the in-app search find accounts you haven't messaged yet (so you can send them
+// a friend request), not just your existing contacts. Only usernames are exposed —
+// no email or other account details — and matches require at least 2 characters to
+// keep this from being a way to enumerate the whole user table one keystroke at a time.
+app.get('/api/users/search', requireAuth, async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim().toLowerCase();
+        if (q.length < 2) return res.json({ users: [] });
+
+        const result = await pgPool.query(
+            'SELECT username FROM users WHERE username ILIKE $1 AND username != $2 ORDER BY username LIMIT 10',
+            [`%${q}%`, req.username]
+        );
+        res.json({ users: result.rows.map(r => r.username) });
+    } catch (err) {
+        console.error('users/search failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/friends/list', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const friendRows = await pgPool.query(
+            'SELECT user_a, user_b, created_at FROM friendships WHERE user_a = $1 OR user_b = $1 ORDER BY created_at DESC',
+            [me]
+        );
+        const friends = friendRows.rows.map(r => ({
+            username: r.user_a === me ? r.user_b : r.user_a,
+            since: r.created_at
+        }));
+
+        const incomingRows = await pgPool.query(
+            "SELECT id, from_user, created_at, note FROM friend_requests WHERE to_user = $1 AND status = 'pending' ORDER BY created_at DESC",
+            [me]
+        );
+        const outgoingRows = await pgPool.query(
+            "SELECT id, to_user, created_at, note FROM friend_requests WHERE from_user = $1 AND status = 'pending' ORDER BY created_at DESC",
+            [me]
+        );
+
+        res.json({
+            friends,
+            incoming: incomingRows.rows.map(r => ({ requestId: r.id, username: r.from_user, createdAt: r.created_at, note: r.note || null })),
+            outgoing: outgoingRows.rows.map(r => ({ requestId: r.id, username: r.to_user, createdAt: r.created_at, note: r.note || null }))
+        });
+    } catch (err) {
+        console.error('friends/list failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/friends/status/:username', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const target = (req.params.username || '').trim().toLowerCase();
+        if (!target || target === me) return res.json({ status: 'none' });
+
+        if (await areFriends(me, target)) return res.json({ status: 'friends' });
+
+        const outgoing = await pgPool.query(
+            "SELECT id FROM friend_requests WHERE from_user = $1 AND to_user = $2 AND status = 'pending'",
+            [me, target]
+        );
+        if (outgoing.rows.length) return res.json({ status: 'pending_outgoing', requestId: outgoing.rows[0].id });
+
+        const incoming = await pgPool.query(
+            "SELECT id FROM friend_requests WHERE from_user = $1 AND to_user = $2 AND status = 'pending'",
+            [target, me]
+        );
+        if (incoming.rows.length) return res.json({ status: 'pending_incoming', requestId: incoming.rows[0].id });
+
+        res.json({ status: 'none' });
+    } catch (err) {
+        console.error('friends/status failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/friends/request', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const target = ((req.body || {}).toUsername || '').trim().toLowerCase();
+        let note = (req.body || {}).note;
+        note = typeof note === 'string' ? note.trim().slice(0, 300) : null;
+        if (!note) note = null;
+        if (!target || target === me) return res.status(400).json({ error: 'Invalid target user.' });
+
+        const targetExists = await pgPool.query('SELECT 1 FROM users WHERE username = $1', [target]);
+        if (!targetExists.rows.length) return res.status(404).json({ error: `User "${target}" was not found.` });
+
+        if (await areFriends(me, target)) return res.json({ status: 'friends' });
+
+        // They already sent me a request — accept it instead of creating a duplicate.
+        const reverseReq = await pgPool.query(
+            "SELECT id FROM friend_requests WHERE from_user = $1 AND to_user = $2 AND status = 'pending'",
+            [target, me]
+        );
+        if (reverseReq.rows.length) {
+            const requestId = reverseReq.rows[0].id;
+            await pgPool.query("UPDATE friend_requests SET status = 'accepted', responded_at = now() WHERE id = $1", [requestId]);
+            const [userA, userB] = friendPairKey(me, target);
+            await pgPool.query(
+                'INSERT INTO friendships (user_a, user_b) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [userA, userB]
+            );
+            await pushToUserSocket(target, 'friend_request_accepted', { byUsername: me });
+            logAnalyticsEvent('friend_connected', me);
+            return res.json({ status: 'friends' });
+        }
+
+        const existingOutgoing = await pgPool.query(
+            "SELECT id FROM friend_requests WHERE from_user = $1 AND to_user = $2 AND status = 'pending'",
+            [me, target]
+        );
+        if (existingOutgoing.rows.length) return res.json({ status: 'pending_outgoing', requestId: existingOutgoing.rows[0].id });
+
+        const inserted = await pgPool.query(
+            "INSERT INTO friend_requests (from_user, to_user, status, note) VALUES ($1, $2, 'pending', $3) RETURNING id",
+            [me, target, note]
+        );
+        const requestId = inserted.rows[0].id;
+        await pushToUserSocket(target, 'friend_request_received', { requestId, fromUsername: me, note });
+        res.json({ status: 'pending_outgoing', requestId });
+    } catch (err) {
+        console.error('friends/request failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/friends/respond', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const { requestId, accept } = req.body || {};
+        if (!requestId) return res.status(400).json({ error: 'requestId is required.' });
+
+        const reqRow = await pgPool.query(
+            "SELECT id, from_user, to_user FROM friend_requests WHERE id = $1 AND status = 'pending'",
+            [requestId]
+        );
+        if (!reqRow.rows.length) return res.status(404).json({ error: 'That request no longer exists.' });
+        const request = reqRow.rows[0];
+        if (request.to_user !== me) return res.status(403).json({ error: 'Not your request to respond to.' });
+
+        if (!accept) {
+            await pgPool.query("UPDATE friend_requests SET status = 'declined', responded_at = now() WHERE id = $1", [requestId]);
+            await pushToUserSocket(request.from_user, 'friend_request_declined', { byUsername: me });
+            return res.json({ ok: true, status: 'declined' });
+        }
+
+        await pgPool.query("UPDATE friend_requests SET status = 'accepted', responded_at = now() WHERE id = $1", [requestId]);
+        const [userA, userB] = friendPairKey(me, request.from_user);
+        await pgPool.query(
+            'INSERT INTO friendships (user_a, user_b) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [userA, userB]
+        );
+        await pushToUserSocket(request.from_user, 'friend_request_accepted', { byUsername: me });
+        logAnalyticsEvent('friend_connected', me);
+        res.json({ ok: true, status: 'accepted', friendUsername: request.from_user });
+    } catch (err) {
+        console.error('friends/respond failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/friends/cancel', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const { requestId } = req.body || {};
+        if (!requestId) return res.status(400).json({ error: 'requestId is required.' });
+
+        const reqRow = await pgPool.query(
+            "SELECT id, from_user, to_user FROM friend_requests WHERE id = $1 AND status = 'pending'",
+            [requestId]
+        );
+        if (!reqRow.rows.length) return res.json({ ok: true });
+        const request = reqRow.rows[0];
+        if (request.from_user !== me) return res.status(403).json({ error: 'Not your request to cancel.' });
+
+        await pgPool.query("UPDATE friend_requests SET status = 'cancelled', responded_at = now() WHERE id = $1", [requestId]);
+        await pushToUserSocket(request.to_user, 'friend_request_cancelled', { byUsername: me });
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('friends/cancel failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/friends/unfriend', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const target = ((req.body || {}).username || '').trim().toLowerCase();
+        if (!target) return res.status(400).json({ error: 'username is required.' });
+
+        const [userA, userB] = friendPairKey(me, target);
+        await pgPool.query('DELETE FROM friendships WHERE user_a = $1 AND user_b = $2', [userA, userB]);
+        await pushToUserSocket(target, 'friend_removed', { byUsername: me });
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('friends/unfriend failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+/* GROUPS — REST for the same reason friend requests are REST rather than sockets:
+   these work the same whether or not the caller is currently connected, with
+   real-time pushes layered on top via pushToUserSocket for whoever's online.
+   Permission model: removing a member, promoting/demoting, and changing the
+   permission toggles themselves are ALWAYS admin-only. Adding members and editing
+   the group's name/photo are admin-only only when only_admins_can_manage is set
+   (default false -- matches most platforms' "anyone can add people" default).
+   Sending messages is gated by only_admins_can_send (default false) and enforced
+   in the send_group_message socket handler, not here. */
+const GROUP_NAME_MAX = 100;
+
+function normalizeGroupMembers(list) {
+    if (!Array.isArray(list)) return [];
+    return [...new Set(list.map(u => String(u || '').trim().toLowerCase()).filter(Boolean))];
+}
+
+app.post('/api/groups/create', requireAuth, async (req, res) => {
+    try {
+        const me = req.username;
+        const name = String((req.body || {}).name || '').trim().slice(0, GROUP_NAME_MAX);
+        const avatar = (req.body || {}).avatar || null;
+        const members = normalizeGroupMembers((req.body || {}).members).filter(u => u !== me);
+
+        if (!name) return res.status(400).json({ error: 'Group name is required.' });
+        if (!members.length) return res.status(400).json({ error: 'Add at least one other member.' });
+        if (members.length > 200) return res.status(400).json({ error: 'A group can have at most 200 members.' });
+
+        // Every initial member has to be a current friend of the creator -- same
+        // spirit as 1:1 messaging requiring an accepted friend request, so a group
+        // can't be used to message strangers who never agreed to hear from you.
+        for (const target of members) {
+            if (!(await areFriends(me, target))) {
+                return res.status(400).json({ error: `You need to be friends with @${target} before adding them to a group.` });
+            }
+        }
+
+        const groupId = crypto.randomUUID();
+        await pgPool.query(
+            'INSERT INTO groups (id, name, avatar, created_by) VALUES ($1, $2, $3, $4)',
+            [groupId, name, avatar, me]
+        );
+        await pgPool.query(
+            "INSERT INTO group_members (group_id, username, role) VALUES ($1, $2, 'admin')",
+            [groupId, me]
+        );
+        for (const target of members) {
+            await pgPool.query(
+                "INSERT INTO group_members (group_id, username, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING",
+                [groupId, target]
+            );
+        }
+
+        const group = serializeGroup(await getGroupOrNull(groupId));
+        const memberRows = await getGroupMembers(groupId);
+        const payload = { group, members: memberRows };
+
+        for (const target of members) {
+            await pushToUserSocket(target, 'group_created', payload);
+        }
+        logAnalyticsEvent('group_created', me);
+        res.json({ ok: true, group, members: memberRows });
+    } catch (err) {
+        console.error('groups/create failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/groups/mine', requireAuth, async (req, res) => {
+    try {
+        const rows = await pgPool.query(
+            `SELECT g.id, g.name, g.avatar, g.created_by, g.only_admins_can_send, g.only_admins_can_manage,
+                    gm.role, g.created_at
+             FROM group_members gm JOIN groups g ON g.id = gm.group_id
+             WHERE gm.username = $1 ORDER BY g.created_at DESC`,
+            [req.username]
+        );
+        res.json({
+            groups: rows.rows.map(r => ({
+                id: r.id, name: r.name, avatar: r.avatar, createdBy: r.created_by,
+                onlyAdminsCanSend: r.only_admins_can_send, onlyAdminsCanManage: r.only_admins_can_manage,
+                myRole: r.role, createdAt: r.created_at
+            }))
+        });
+    } catch (err) {
+        console.error('groups/mine failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/groups/:id', requireAuth, async (req, res) => {
+    try {
+        const role = await getGroupRole(req.params.id, req.username);
+        if (!role) return res.status(403).json({ error: 'Not a member of this group.' });
+        const group = await getGroupOrNull(req.params.id);
+        if (!group) return res.status(404).json({ error: 'Group not found.' });
+        const members = await getGroupMembers(req.params.id);
+        res.json({ group: serializeGroup(group), members, myRole: role });
+    } catch (err) {
+        console.error('groups/:id failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.patch('/api/groups/:id', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (!role) return res.status(403).json({ error: 'Not a member of this group.' });
+        const group = await getGroupOrNull(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found.' });
+        if (group.only_admins_can_manage && role !== 'admin') {
+            return res.status(403).json({ error: 'Only admins can edit this group.' });
+        }
+
+        const updates = [];
+        const values = [];
+        if (typeof (req.body || {}).name === 'string') {
+            const name = req.body.name.trim().slice(0, GROUP_NAME_MAX);
+            if (!name) return res.status(400).json({ error: 'Group name cannot be empty.' });
+            values.push(name);
+            updates.push(`name = $${values.length}`);
+        }
+        if ('avatar' in (req.body || {})) {
+            values.push(req.body.avatar || null);
+            updates.push(`avatar = $${values.length}`);
+        }
+        if (!updates.length) return res.status(400).json({ error: 'Nothing to update.' });
+
+        values.push(groupId);
+        await pgPool.query(`UPDATE groups SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+
+        const updatedGroup = serializeGroup(await getGroupOrNull(groupId));
+        const members = await getGroupMembers(groupId);
+        for (const m of members) {
+            if (m.username === req.username) continue;
+            await pushToUserSocket(m.username, 'group_updated', { group: updatedGroup, byUsername: req.username });
+        }
+        res.json({ ok: true, group: updatedGroup });
+    } catch (err) {
+        console.error('groups/:id patch failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.patch('/api/groups/:id/permissions', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (role !== 'admin') return res.status(403).json({ error: 'Only admins can change group permissions.' });
+
+        const { onlyAdminsCanSend, onlyAdminsCanManage } = req.body || {};
+        const updates = [];
+        const values = [];
+        if (typeof onlyAdminsCanSend === 'boolean') { values.push(onlyAdminsCanSend); updates.push(`only_admins_can_send = $${values.length}`); }
+        if (typeof onlyAdminsCanManage === 'boolean') { values.push(onlyAdminsCanManage); updates.push(`only_admins_can_manage = $${values.length}`); }
+        if (!updates.length) return res.status(400).json({ error: 'Nothing to update.' });
+
+        values.push(groupId);
+        await pgPool.query(`UPDATE groups SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+
+        const updatedGroup = serializeGroup(await getGroupOrNull(groupId));
+        const members = await getGroupMembers(groupId);
+        for (const m of members) {
+            if (m.username === req.username) continue;
+            await pushToUserSocket(m.username, 'group_updated', { group: updatedGroup, byUsername: req.username });
+        }
+        res.json({ ok: true, group: updatedGroup });
+    } catch (err) {
+        console.error('groups/:id/permissions failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/groups/:id/add-members', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (!role) return res.status(403).json({ error: 'Not a member of this group.' });
+        const group = await getGroupOrNull(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found.' });
+        if (group.only_admins_can_manage && role !== 'admin') {
+            return res.status(403).json({ error: 'Only admins can add members to this group.' });
+        }
+
+        const newMembers = normalizeGroupMembers((req.body || {}).usernames);
+        if (!newMembers.length) return res.status(400).json({ error: 'No usernames provided.' });
+
+        const existing = await getGroupMembers(groupId);
+        if (existing.length + newMembers.length > 200) {
+            return res.status(400).json({ error: 'A group can have at most 200 members.' });
+        }
+
+        const added = [];
+        for (const target of newMembers) {
+            if (existing.some(m => m.username === target)) continue; // already a member
+            // Same friend-gate as group creation -- whoever's ADDING them has to be
+            // friends with the person being added.
+            if (!(await areFriends(req.username, target))) continue;
+            await pgPool.query(
+                "INSERT INTO group_members (group_id, username, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING",
+                [groupId, target]
+            );
+            added.push(target);
+        }
+
+        const members = await getGroupMembers(groupId);
+        const payload = { group: serializeGroup(group), members, addedBy: req.username, addedUsernames: added };
+        for (const m of members) {
+            await pushToUserSocket(m.username, m.username === req.username ? 'group_members_added_self' : 'group_members_added', payload);
+        }
+        res.json({ ok: true, added, members });
+    } catch (err) {
+        console.error('groups/:id/add-members failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/groups/:id/remove-member', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (role !== 'admin') return res.status(403).json({ error: 'Only admins can remove members.' });
+
+        const target = String((req.body || {}).username || '').trim().toLowerCase();
+        if (!target) return res.status(400).json({ error: 'username is required.' });
+        if (target === req.username) return res.status(400).json({ error: 'Use Leave Group to remove yourself.' });
+
+        await pgPool.query('DELETE FROM group_members WHERE group_id = $1 AND username = $2', [groupId, target]);
+
+        const group = serializeGroup(await getGroupOrNull(groupId));
+        const members = await getGroupMembers(groupId);
+        const payload = { group, members, removedUsername: target, byUsername: req.username };
+        await pushToUserSocket(target, 'group_removed_self', payload);
+        for (const m of members) {
+            await pushToUserSocket(m.username, 'group_member_removed', payload);
+        }
+        res.json({ ok: true, members });
+    } catch (err) {
+        console.error('groups/:id/remove-member failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/groups/:id/leave', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (!role) return res.status(400).json({ error: 'You are not a member of this group.' });
+
+        await pgPool.query('DELETE FROM group_members WHERE group_id = $1 AND username = $2', [groupId, req.username]);
+
+        let members = await getGroupMembers(groupId);
+        // A group should never end up with members but no admin -- if the last admin
+        // just left, hand the role to whoever's been there longest.
+        if (members.length && role === 'admin' && !members.some(m => m.role === 'admin')) {
+            await pgPool.query("UPDATE group_members SET role = 'admin' WHERE group_id = $1 AND username = $2", [groupId, members[0].username]);
+            members = await getGroupMembers(groupId);
+        }
+        if (!members.length) {
+            await pgPool.query('DELETE FROM groups WHERE id = $1', [groupId]);
+        }
+
+        const group = serializeGroup(await getGroupOrNull(groupId));
+        const payload = { groupId, members, byUsername: req.username };
+        for (const m of members) {
+            await pushToUserSocket(m.username, 'group_member_left', { ...payload, group });
+        }
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('groups/:id/leave failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/groups/:id/set-role', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (role !== 'admin') return res.status(403).json({ error: 'Only admins can change roles.' });
+
+        const target = String((req.body || {}).username || '').trim().toLowerCase();
+        const newRole = (req.body || {}).role === 'admin' ? 'admin' : 'member';
+        if (!target) return res.status(400).json({ error: 'username is required.' });
+
+        const targetRole = await getGroupRole(groupId, target);
+        if (!targetRole) return res.status(404).json({ error: 'That user is not in this group.' });
+
+        await pgPool.query('UPDATE group_members SET role = $1 WHERE group_id = $2 AND username = $3', [newRole, groupId, target]);
+
+        const group = serializeGroup(await getGroupOrNull(groupId));
+        const members = await getGroupMembers(groupId);
+        const payload = { group, members, byUsername: req.username };
+        for (const m of members) {
+            await pushToUserSocket(m.username, 'group_updated', payload);
+        }
+        res.json({ ok: true, members });
+    } catch (err) {
+        console.error('groups/:id/set-role failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Invite codes are redeemed by a logged-in user via /api/groups/join/:code (not a
+// public unauthenticated URL) -- keeps this simple and still gated behind having
+// an account, rather than standing up a separate public join page.
+app.post('/api/groups/:id/invite', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (!role) return res.status(403).json({ error: 'Not a member of this group.' });
+        const group = await getGroupOrNull(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found.' });
+        if (group.only_admins_can_manage && role !== 'admin') {
+            return res.status(403).json({ error: 'Only admins can create invite links for this group.' });
+        }
+
+        const code = crypto.randomBytes(9).toString('base64url'); // 12 chars, URL-safe
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        await pgPool.query(
+            'INSERT INTO group_invites (code, group_id, created_by, expires_at) VALUES ($1, $2, $3, $4)',
+            [code, groupId, req.username, expiresAt]
+        );
+        res.json({ ok: true, code, expiresAt });
+    } catch (err) {
+        console.error('groups/:id/invite failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/groups/join/:code', requireAuth, async (req, res) => {
+    try {
+        const code = req.params.code;
+        const inviteRow = await pgPool.query('SELECT * FROM group_invites WHERE code = $1', [code]);
+        if (!inviteRow.rows.length) return res.status(404).json({ error: 'That invite link is invalid.' });
+        const invite = inviteRow.rows[0];
+        if (invite.revoked) return res.status(410).json({ error: 'That invite link has been revoked.' });
+        if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+            return res.status(410).json({ error: 'That invite link has expired.' });
+        }
+
+        const groupRow = await getGroupOrNull(invite.group_id);
+        if (!groupRow) return res.status(404).json({ error: 'This group no longer exists.' });
+        const group = serializeGroup(groupRow);
+
+        const alreadyMember = await getGroupRole(invite.group_id, req.username);
+        if (!alreadyMember) {
+            await pgPool.query(
+                "INSERT INTO group_members (group_id, username, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING",
+                [invite.group_id, req.username]
+            );
+        }
+
+        const members = await getGroupMembers(invite.group_id);
+        const payload = { group, members, addedUsernames: [req.username], addedBy: req.username };
+        for (const m of members) {
+            if (m.username === req.username) continue;
+            await pushToUserSocket(m.username, 'group_members_added', payload);
+        }
+        res.json({ ok: true, group, members });
+    } catch (err) {
+        console.error('groups/join failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.delete('/api/groups/:id/invite/:code', requireAuth, async (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const role = await getGroupRole(groupId, req.username);
+        if (!role) return res.status(403).json({ error: 'Not a member of this group.' });
+        await pgPool.query('UPDATE group_invites SET revoked = true WHERE code = $1 AND group_id = $2', [req.params.code, groupId]);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('groups/:id/invite revoke failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+const BACKUP_RATE_LIMIT = 5;
+const BACKUP_RATE_WINDOW = 60 * 60; // 1 hour
+
+app.post('/api/auth/backup-email', requireAuth, async (req, res) => {
+    const { filename, base64Blob } = req.body || {};
+    if (!filename || !base64Blob || typeof base64Blob !== 'string') {
+        return res.status(400).json({ error: 'filename and base64Blob are required.' });
+    }
+    // ~15MB base64 guardrail mirrored server-side (client already enforces this, but don't trust it alone)
+    if (base64Blob.length > 20 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Backup is too large to email.' });
+    }
+
+    const withinLimit = await checkAndBumpRateLimit(`ratelimit:backup:${req.username}`, BACKUP_RATE_LIMIT, BACKUP_RATE_WINDOW);
+    if (!withinLimit) {
+        return res.status(429).json({ error: 'Too many backup emails requested. Please try again later.' });
+    }
+
+    try {
+        const result = await pgPool.query('SELECT email FROM users WHERE username = $1', [req.username]);
+        if (!result.rows.length) return res.status(404).json({ error: 'Account not found.' });
+
+        if (resend) {
+            await resend.emails.send({
+                from: 'HAI <noreply@myhai.org>',
+                to: result.rows[0].email,
+                subject: 'Your HAI encrypted chat backup',
+                text: 'Attached is an encrypted backup of your HAI chat history. It can only be restored inside the HAI app using your account password. Do not share this file.',
+                attachments: [{ filename, content: Buffer.from(base64Blob, 'base64') }]
+            });
+        } else {
+            console.warn('RESEND_API_KEY not set — backup email not sent.');
+            return res.status(503).json({ error: 'Email backend is not configured.' });
+        }
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('backup-email failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong sending your backup. Please try again.' });
+    }
 });
 
 const server = http.createServer(app);
@@ -184,9 +1241,6 @@ const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] },
     maxHttpBufferSize: 8 * 1024 * 1024 // allow encrypted photo/voice-note/document payloads through
 });
-// Socket.IO's handshake is served by engine.io directly on the raw HTTP server, bypassing
-// Express entirely — without this, someone could skip the login prompt and still open a socket.
-io.engine.use(basicAuthMiddleware);
 
 const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
 redisClient.connect().then(() => console.log('🌪️ Redis connected')).catch(err => console.error(err));
@@ -218,6 +1272,18 @@ function generateNearbyAlias() {
 }
 const NEARBY_ALIAS_TTL = 60 * 60 * 2; // 2h — stable alias window while browsing/mid-conversation
 const NEARBY_MATCH_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const NEARBY_GEO_TTL = 60 * 15; // 15 min — location goes stale fast; re-sent each time the Nearby tab is opened
+const NEARBY_RADIUS_MILES = 10;
+
+// Great-circle distance between two lat/lng points, in miles.
+function haversineMiles(lat1, lon1, lat2, lon2) {
+    const toRad = deg => deg * Math.PI / 180;
+    const R = 3958.8; // Earth radius in miles
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 // Returns (generating if needed) the alias `viewer` sees for `target`, plus the
 // reverse aliasId->target lookup used to resolve connect requests server-side.
@@ -280,14 +1346,596 @@ setInterval(async () => {
     }
 }, 5 * 60 * 1000);
 
+/* ============ ADMIN ANALYTICS DASHBOARD ============
+   Everything here is gated behind requireAuth + requireAdmin. Metrics are always
+   computed from analytics_events (see logAnalyticsEvent above) plus a couple of
+   live point-in-time counts (online now, total users/groups) -- never from
+   message content, which the server never has access to. */
+
+const ANALYTICS_METRICS = {
+    signups: { label: 'Signups', eventTypes: ['signup'], distinctUser: false },
+    logins: { label: 'Logins', eventTypes: ['login'], distinctUser: false },
+    messages_1to1: { label: '1:1 Messages Sent', eventTypes: ['message_sent'], distinctUser: false },
+    messages_group: { label: 'Group Messages Sent', eventTypes: ['group_message_sent'], distinctUser: false },
+    messages_total: { label: 'Total Messages Sent', eventTypes: ['message_sent', 'group_message_sent'], distinctUser: false },
+    groups_created: { label: 'Groups Created', eventTypes: ['group_created'], distinctUser: false },
+    friend_connections: { label: 'New Friend Connections', eventTypes: ['friend_connected'], distinctUser: false },
+    active_users: { label: 'Active Users (DAU)', eventTypes: null, distinctUser: true }
+};
+
+// Returns a full day-by-day series over the requested range, zero-filling days
+// with no events so a chart never shows a misleading gap as "no data yet".
+async function getTimeseries(metricKey, daysParam) {
+    const metric = ANALYTICS_METRICS[metricKey];
+    if (!metric) return null;
+    const days = Math.max(1, Math.min(365, parseInt(daysParam, 10) || 30));
+
+    const selectCol = metric.distinctUser ? 'COUNT(DISTINCT username)' : 'COUNT(*)';
+    const typeClause = metric.eventTypes ? 'AND event_type = ANY($2)' : '';
+    const params = metric.eventTypes ? [String(days), metric.eventTypes] : [String(days)];
+    const sql = `
+        SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, ${selectCol} AS value
+        FROM analytics_events
+        WHERE created_at >= now() - ($1 || ' days')::interval ${typeClause}
+        GROUP BY day ORDER BY day
+    `;
+    const result = await pgPool.query(sql, params);
+    const byDay = {};
+    result.rows.forEach(r => { byDay[r.day] = parseInt(r.value, 10); });
+
+    const series = [];
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        series.push({ date: key, value: byDay[key] || 0 });
+    }
+    return series;
+}
+
+app.get('/api/admin/overview', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const [onlineNow, totalUsersRow, totalGroupsRow, messagesTodayRow, signupsTodayRow, messages7dRow, signups7dRow] = await Promise.all([
+            redisClient.sCard('online_users'),
+            pgPool.query('SELECT COUNT(*) FROM users'),
+            pgPool.query('SELECT COUNT(*) FROM groups'),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type IN ('message_sent', 'group_message_sent') AND created_at >= date_trunc('day', now())`),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type = 'signup' AND created_at >= date_trunc('day', now())`),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type IN ('message_sent', 'group_message_sent') AND created_at >= now() - interval '7 days'`),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type = 'signup' AND created_at >= now() - interval '7 days'`)
+        ]);
+        res.json({
+            onlineNow,
+            totalUsers: parseInt(totalUsersRow.rows[0].count, 10),
+            totalGroups: parseInt(totalGroupsRow.rows[0].count, 10),
+            messagesToday: parseInt(messagesTodayRow.rows[0].count, 10),
+            signupsToday: parseInt(signupsTodayRow.rows[0].count, 10),
+            messages7d: parseInt(messages7dRow.rows[0].count, 10),
+            signups7d: parseInt(signups7dRow.rows[0].count, 10)
+        });
+    } catch (err) {
+        console.error('admin/overview failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/admin/metrics', requireAuth, requireAdmin, (req, res) => {
+    res.json({ metrics: Object.entries(ANALYTICS_METRICS).map(([key, m]) => ({ key, label: m.label })) });
+});
+
+app.get('/api/admin/timeseries', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const series = await getTimeseries(req.query.metric, req.query.days);
+        if (!series) return res.status(400).json({ error: 'Unknown metric.' });
+        res.json({ metric: req.query.metric, series });
+    } catch (err) {
+        console.error('admin/timeseries failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/admin/export', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const series = await getTimeseries(req.query.metric, req.query.days);
+        if (!series) return res.status(400).json({ error: 'Unknown metric.' });
+        const csv = 'date,value\n' + series.map(r => `${r.date},${r.value}`).join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="${req.query.metric}.csv"`);
+        res.send(csv);
+    } catch (err) {
+        console.error('admin/export failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/admin/dashboards', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const r = await pgPool.query('SELECT id, name, layout, updated_at FROM admin_dashboards WHERE created_by = $1 ORDER BY created_at ASC', [req.username]);
+        res.json({ dashboards: r.rows.map(row => ({ id: row.id, name: row.name, layout: row.layout, updatedAt: row.updated_at })) });
+    } catch (err) {
+        console.error('admin/dashboards get failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/admin/dashboards', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const name = String((req.body || {}).name || 'New Dashboard').trim().slice(0, 100) || 'New Dashboard';
+        const layout = Array.isArray((req.body || {}).layout) ? req.body.layout : [];
+        const id = crypto.randomUUID();
+        await pgPool.query('INSERT INTO admin_dashboards (id, created_by, name, layout) VALUES ($1, $2, $3, $4)', [id, req.username, name, JSON.stringify(layout)]);
+        res.json({ ok: true, id });
+    } catch (err) {
+        console.error('admin/dashboards create failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.patch('/api/admin/dashboards/:id', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const own = await pgPool.query('SELECT 1 FROM admin_dashboards WHERE id = $1 AND created_by = $2', [req.params.id, req.username]);
+        if (!own.rows.length) return res.status(404).json({ error: 'Dashboard not found.' });
+
+        const updates = [];
+        const values = [];
+        if (typeof (req.body || {}).name === 'string') {
+            values.push(req.body.name.trim().slice(0, 100));
+            updates.push(`name = $${values.length}`);
+        }
+        if (Array.isArray((req.body || {}).layout)) {
+            values.push(JSON.stringify(req.body.layout));
+            updates.push(`layout = $${values.length}`);
+        }
+        if (!updates.length) return res.status(400).json({ error: 'Nothing to update.' });
+        updates.push('updated_at = now()');
+
+        values.push(req.params.id);
+        await pgPool.query(`UPDATE admin_dashboards SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('admin/dashboards update failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.delete('/api/admin/dashboards/:id', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        await pgPool.query('DELETE FROM admin_dashboards WHERE id = $1 AND created_by = $2', [req.params.id, req.username]);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('admin/dashboards delete failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/admin/reports', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const r = await pgPool.query(
+            `SELECT r.id, r.dashboard_id, r.email, r.frequency, r.last_sent_at, d.name AS dashboard_name
+             FROM admin_scheduled_reports r JOIN admin_dashboards d ON d.id = r.dashboard_id
+             WHERE r.created_by = $1 ORDER BY r.created_at ASC`,
+            [req.username]
+        );
+        res.json({
+            reports: r.rows.map(row => ({
+                id: row.id, dashboardId: row.dashboard_id, dashboardName: row.dashboard_name,
+                email: row.email, frequency: row.frequency, lastSentAt: row.last_sent_at
+            })),
+            emailEnabled: !!resend
+        });
+    } catch (err) {
+        console.error('admin/reports get failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/admin/reports', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { dashboardId, email, frequency } = req.body || {};
+        if (!dashboardId || !email || !EMAIL_PATTERN.test(email)) {
+            return res.status(400).json({ error: 'A dashboard and a valid email are required.' });
+        }
+        const own = await pgPool.query('SELECT 1 FROM admin_dashboards WHERE id = $1 AND created_by = $2', [dashboardId, req.username]);
+        if (!own.rows.length) return res.status(404).json({ error: 'Dashboard not found.' });
+
+        const freq = frequency === 'daily' ? 'daily' : 'weekly';
+        const id = crypto.randomUUID();
+        await pgPool.query(
+            'INSERT INTO admin_scheduled_reports (id, dashboard_id, created_by, email, frequency) VALUES ($1, $2, $3, $4, $5)',
+            [id, dashboardId, req.username, email.trim().toLowerCase(), freq]
+        );
+        res.json({ ok: true, id });
+    } catch (err) {
+        console.error('admin/reports create failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.delete('/api/admin/reports/:id', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        await pgPool.query('DELETE FROM admin_scheduled_reports WHERE id = $1 AND created_by = $2', [req.params.id, req.username]);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('admin/reports delete failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Hourly due-check: a report fires once its last send is older than its
+// frequency window (or it's never been sent). Skipped entirely if no
+// RESEND_API_KEY is configured -- reports still save fine, they just won't
+// deliver until email is set up, same posture as verification email.
+async function sendScheduledReports() {
+    if (!resend) return;
+    try {
+        const due = await pgPool.query(`
+            SELECT r.*, d.name AS dashboard_name, d.layout FROM admin_scheduled_reports r
+            JOIN admin_dashboards d ON d.id = r.dashboard_id
+            WHERE (r.last_sent_at IS NULL)
+               OR (r.frequency = 'daily' AND r.last_sent_at < now() - interval '1 day')
+               OR (r.frequency = 'weekly' AND r.last_sent_at < now() - interval '7 days')
+        `);
+        for (const report of due.rows) {
+            const widgets = Array.isArray(report.layout) ? report.layout : [];
+            let rowsHtml = '';
+            for (const w of widgets) {
+                const series = await getTimeseries(w.metric, w.rangeDays || 7);
+                if (!series) continue;
+                const total = series.reduce((sum, p) => sum + p.value, 0);
+                const metricLabel = (ANALYTICS_METRICS[w.metric] || {}).label || w.metric;
+                rowsHtml += `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee;">${w.title || metricLabel}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${total}</td></tr>`;
+            }
+            const html = `
+                <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
+                    <h2 style="margin-bottom:4px;">${report.dashboard_name}</h2>
+                    <p style="color:#888;margin-top:0;">${report.frequency === 'daily' ? 'Daily' : 'Weekly'} report — totals over the widget's own date range</p>
+                    <table style="width:100%;border-collapse:collapse;">${rowsHtml}</table>
+                    <p style="color:#aaa;font-size:12px;margin-top:16px;">Sent by your HAI Admin Dashboard</p>
+                </div>`;
+            try {
+                await resend.emails.send({
+                    from: 'HAI <noreply@myhai.org>',
+                    to: report.email,
+                    subject: `${report.dashboard_name} — ${report.frequency} report`,
+                    html
+                });
+                await pgPool.query('UPDATE admin_scheduled_reports SET last_sent_at = now() WHERE id = $1', [report.id]);
+            } catch (err) {
+                console.error('Failed to send scheduled report:', err.message);
+            }
+        }
+    } catch (err) {
+        console.error('Scheduled report sweep failed:', err.message);
+    }
+}
+setInterval(sendScheduledReports, 60 * 60 * 1000);
+
+/* ============ AI MODE — edit this app's own source with natural-language
+   instructions instead of hand-editing files. Admin-only (same requireAdmin as
+   the analytics dashboard). The AI never writes directly to disk: it proposes
+   targeted old_string -> new_string edits (same shape as a code-editor's find-
+   and-replace), the server validates each one matches exactly once in the
+   CURRENT file, the client shows a diff, and nothing touches disk until the
+   admin explicitly applies it. Every applied change is snapshotted first so any
+   edit (including a bad one) can be reverted in one click. */
+
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+const CLAUDE_CLI_SCRATCH_DIR = path.join(__dirname, 'ai_cli_scratch');
+fs.mkdirSync(CLAUDE_CLI_SCRATCH_DIR, { recursive: true });
+
+// Fixed allowlist, never built from user input -- the `file` request param is
+// only ever used as a key into this object, so there's no path-traversal
+// surface no matter what a client sends.
+const AI_EDITABLE_FILES = {
+    'index.html': path.join(__dirname, 'public', 'index.html'),
+    'server.js': path.join(__dirname, 'server.js')
+};
+
+const AI_BACKUPS_DIR = path.join(__dirname, 'ai_backups');
+const AI_MANIFEST_PATH = path.join(AI_BACKUPS_DIR, 'manifest.json');
+fs.mkdirSync(AI_BACKUPS_DIR, { recursive: true });
+
+async function readAiManifest() {
+    try {
+        return JSON.parse(await fsp.readFile(AI_MANIFEST_PATH, 'utf8'));
+    } catch (err) {
+        return [];
+    }
+}
+async function writeAiManifest(manifest) {
+    await fsp.writeFile(AI_MANIFEST_PATH, JSON.stringify(manifest, null, 2), 'utf8');
+}
+// Snapshots the given content BEFORE a change is made, not after -- so restoring
+// a backup always means "put it back the way it was right before this edit".
+// Keeps at most 30 backups per file so ai_backups/ doesn't grow unbounded.
+async function backupAiFile(file, content, note) {
+    const id = crypto.randomUUID();
+    await fsp.writeFile(path.join(AI_BACKUPS_DIR, `${id}.snapshot`), content, 'utf8');
+    const manifest = await readAiManifest();
+    manifest.unshift({ id, file, timestamp: new Date().toISOString(), note: String(note || '').slice(0, 200) });
+    const perFileCount = {};
+    const trimmed = [];
+    for (const entry of manifest) {
+        perFileCount[entry.file] = (perFileCount[entry.file] || 0) + 1;
+        if (perFileCount[entry.file] <= 30) trimmed.push(entry);
+        else { try { await fsp.unlink(path.join(AI_BACKUPS_DIR, `${entry.id}.snapshot`)); } catch (e) {} }
+    }
+    await writeAiManifest(trimmed);
+    return id;
+}
+
+function isClaudeCliConfigured() {
+    return !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+}
+
+// Runs the Claude Code CLI in non-interactive "print" mode as a plain text
+// completion -- billed against the site owner's Claude Pro/Max plan (via
+// CLAUDE_CODE_OAUTH_TOKEN, see `claude setup-token`) instead of a separate
+// pay-per-token API key. Deliberately NOT given --dangerously-skip-permissions
+// and run from an empty scratch directory instead of the real project folder,
+// so even if it tried to use a file/shell tool on its own it couldn't touch
+// anything real -- it can only ever hand back text. The actual file edit still
+// only happens through our own reviewed/backed-up /api/admin/ai/apply path.
+function callClaudeCli(fullPrompt) {
+    return new Promise((resolve, reject) => {
+        if (!isClaudeCliConfigured()) {
+            return reject(new Error('AI Mode is not configured -- set CLAUDE_CODE_OAUTH_TOKEN in the server .env (run `claude setup-token` to generate one) and restart.'));
+        }
+        const child = spawn(
+            'claude',
+            ['-p', '--output-format', 'text', '--model', ANTHROPIC_MODEL],
+            { cwd: CLAUDE_CLI_SCRATCH_DIR, env: process.env }
+        );
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', d => { stdout += d; });
+        child.stderr.on('data', d => { stderr += d; });
+        child.on('error', err => reject(new Error(`Could not run the Claude Code CLI: ${err.message}`)));
+        child.on('close', code => {
+            if (code !== 0) return reject(new Error(stderr.trim() || `Claude Code CLI exited with code ${code}.`));
+            resolve(stdout);
+        });
+        child.stdin.write(fullPrompt);
+        child.stdin.end();
+    });
+}
+
+// The CLI takes one flat prompt in text mode, not a structured messages array
+// -- so the system instructions and prior conversation turns are flattened
+// into a single transcript instead of separate API-style message objects.
+function buildFullPromptForCli(systemPrompt, messages) {
+    let prompt = systemPrompt + '\n\n---\n\nConversation so far:\n\n';
+    for (const m of messages) {
+        prompt += `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}\n\n`;
+    }
+    prompt += 'Respond now as Assistant, following the JSON-only response format described above.';
+    return prompt;
+}
+
+// The model is told to answer with ONLY a JSON object; this strips a ```json
+// fence if it wraps one anyway despite the instruction not to.
+function extractJsonFromClaudeText(text) {
+    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    return fenceMatch ? fenceMatch[1] : text;
+}
+
+// Every editable file is always shown to the AI together -- the admin just
+// describes a change without saying where it lives, and each proposed edit
+// carries its own "file" so a single request can touch index.html, server.js,
+// or both in one go.
+async function readAllEditableFiles() {
+    const entries = await Promise.all(
+        Object.keys(AI_EDITABLE_FILES).map(async key => [key, await fsp.readFile(AI_EDITABLE_FILES[key], 'utf8')])
+    );
+    return Object.fromEntries(entries);
+}
+
+function buildAiSystemPrompt(filesMap) {
+    const fileBlocks = Object.entries(filesMap)
+        .map(([key, content]) => `<file path="${key}">\n${content}\n</file>`)
+        .join('\n\n');
+
+    return `You are an expert web developer helping edit the source code of a self-hosted, end-to-end encrypted chat application called HAI, directly through this chat -- the person you're talking to is a non-technical site owner, not a programmer. They will just describe what they want changed without telling you which file it's in -- figure that out yourself from the code below.
+
+Below is the CURRENT FULL CONTENT of every editable file. Read them carefully before proposing anything.
+
+${fileBlocks}
+
+Respond with ONLY a JSON object (no markdown fences, no prose outside the JSON) in exactly this shape:
+{
+  "explanation": "<1-3 plain-English sentences describing what you changed and why, for a non-technical reader>",
+  "edits": [
+    { "file": "<the exact path shown in the <file path=\"...\"> tag this edit belongs to>", "old_string": "<exact substring copied from that file, with enough surrounding context to be unique within it>", "new_string": "<the replacement text>" }
+  ]
+}
+
+Rules:
+- "file" must be exactly one of the file paths shown above.
+- old_string must match, character for character (including whitespace/indentation), a UNIQUE substring of that file's content shown above. If a short snippet wouldn't be unique, include more surrounding lines until it is.
+- Never use "..." or ellipses inside old_string/new_string -- every character must be literal, real text from the file.
+- A single request may include edits across more than one file if the change genuinely requires it (e.g. a new API field used by both frontend and backend).
+- Keep edits minimal and targeted; don't rewrite unrelated code or reformat things the user didn't ask about.
+- If the request is ambiguous, unsafe, or you need more information, return an empty "edits" array and put your question or concern in "explanation" -- do not guess at a destructive or unclear change.
+- This app never sees plaintext message content server-side (everything is end-to-end encrypted client-side) -- never add code that logs, stores, or transmits message plaintext to the server.
+- Never remove or weaken requireAuth/requireAdmin checks, encryption logic, or friend-gating unless the user explicitly and unambiguously asks you to.`;
+}
+
+app.get('/api/admin/ai/status', requireAuth, requireAdmin, (req, res) => {
+    res.json({ configured: isClaudeCliConfigured(), model: ANTHROPIC_MODEL, files: Object.keys(AI_EDITABLE_FILES) });
+});
+
+app.post('/api/admin/ai/chat', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { messages } = req.body || {};
+        if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ error: 'messages is required.' });
+
+        // Read fresh on every turn (not cached) so the AI always reasons about the
+        // TRUE current files, including any edits applied earlier in this same
+        // conversation or by a previous session.
+        const filesMap = await readAllEditableFiles();
+        const systemPrompt = buildAiSystemPrompt(filesMap);
+        const claudeMessages = messages.map(m => ({ role: m.role, content: m.content }));
+
+        const fullPrompt = buildFullPromptForCli(systemPrompt, claudeMessages);
+        const rawText = await callClaudeCli(fullPrompt);
+
+        let parsed;
+        try {
+            parsed = JSON.parse(extractJsonFromClaudeText(rawText));
+        } catch (err) {
+            return res.json({ explanation: rawText.trim(), edits: [] });
+        }
+
+        // Validate every proposed edit against the file it claims and the content
+        // we just read, BEFORE it ever reaches the UI as something that looks safe
+        // to apply.
+        const edits = (parsed.edits || []).map(e => {
+            const fileContent = filesMap[e.file];
+            const occurrences = (fileContent && e.old_string) ? fileContent.split(e.old_string).length - 1 : 0;
+            return {
+                file: e.file || '',
+                old_string: e.old_string || '',
+                new_string: e.new_string || '',
+                valid: !!fileContent && occurrences === 1,
+                occurrences
+            };
+        });
+
+        res.json({ explanation: parsed.explanation || '', edits });
+    } catch (err) {
+        console.error('ai/chat failed:', err.message);
+        res.status(500).json({ error: err.message || 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/admin/ai/apply', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { edits, note } = req.body || {};
+        if (!Array.isArray(edits) || !edits.length) return res.status(400).json({ error: 'No edits to apply.' });
+        for (const e of edits) {
+            if (!AI_EDITABLE_FILES[e.file]) return res.status(400).json({ error: `Unknown file: ${e.file}` });
+        }
+
+        // Group edits by file since one request can span both -- read/validate/
+        // backup/write each affected file as its own unit.
+        const editsByFile = {};
+        for (const e of edits) (editsByFile[e.file] = editsByFile[e.file] || []).push(e);
+
+        const fileContents = {};
+        for (const file of Object.keys(editsByFile)) {
+            fileContents[file] = await fsp.readFile(AI_EDITABLE_FILES[file], 'utf8');
+        }
+
+        // Re-validate against each file's CURRENT on-disk state -- it may have
+        // changed since the /chat call that proposed these edits (another edit
+        // applied, or the file changed by hand) -- rather than trusting the
+        // client's copy of "valid" from that earlier response.
+        for (const [file, fileEdits] of Object.entries(editsByFile)) {
+            for (const e of fileEdits) {
+                const occurrences = fileContents[file].split(e.old_string).length - 1;
+                if (occurrences !== 1) {
+                    return res.status(409).json({ error: `One of the changes to ${file} no longer applies cleanly (found ${occurrences} matching spot${occurrences === 1 ? '' : 's'} instead of 1) -- the file may have changed. Please ask again.` });
+                }
+            }
+        }
+
+        for (const [file, fileEdits] of Object.entries(editsByFile)) {
+            await backupAiFile(file, fileContents[file], note || '');
+            let content = fileContents[file];
+            for (const e of fileEdits) content = content.replace(e.old_string, e.new_string);
+            await fsp.writeFile(AI_EDITABLE_FILES[file], content, 'utf8');
+        }
+        logAnalyticsEvent('ai_edit_applied', req.username);
+
+        const touchedServerJs = Object.prototype.hasOwnProperty.call(editsByFile, 'server.js');
+        if (touchedServerJs) {
+            // Static files (index.html) take effect on next page refresh with
+            // nothing to restart; server.js needs the process itself to reload the
+            // new code. docker-compose's restart policy brings the container
+            // straight back up after this exit with the files we just wrote
+            // already in place.
+            res.json({ ok: true, restarting: true, filesChanged: Object.keys(editsByFile) });
+            setTimeout(() => process.exit(0), 800);
+        } else {
+            res.json({ ok: true, restarting: false, filesChanged: Object.keys(editsByFile) });
+        }
+    } catch (err) {
+        console.error('ai/apply failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.get('/api/admin/ai/backups', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        if (!AI_EDITABLE_FILES[req.query.file]) return res.status(400).json({ error: 'Unknown file.' });
+        const manifest = await readAiManifest();
+        res.json({ backups: manifest.filter(b => b.file === req.query.file) });
+    } catch (err) {
+        console.error('ai/backups failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/admin/ai/restore', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { file, backupId } = req.body || {};
+        if (!AI_EDITABLE_FILES[file]) return res.status(400).json({ error: 'Unknown file.' });
+        const manifest = await readAiManifest();
+        const entry = manifest.find(b => b.id === backupId && b.file === file);
+        if (!entry) return res.status(404).json({ error: 'Backup not found.' });
+
+        const filePath = AI_EDITABLE_FILES[file];
+        const currentContent = await fsp.readFile(filePath, 'utf8');
+        await backupAiFile(file, currentContent, `auto-backup before restoring "${entry.note || entry.timestamp}"`);
+
+        const snapshotContent = await fsp.readFile(path.join(AI_BACKUPS_DIR, `${entry.id}.snapshot`), 'utf8');
+        await fsp.writeFile(filePath, snapshotContent, 'utf8');
+        logAnalyticsEvent('ai_backup_restored', req.username);
+
+        if (file === 'server.js') {
+            res.json({ ok: true, restarting: true });
+            setTimeout(() => process.exit(0), 800);
+        } else {
+            res.json({ ok: true, restarting: false });
+        }
+    } catch (err) {
+        console.error('ai/restore failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
 io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // Map user to socket ID and store their public key string inside Redis
+    // Map user to socket ID and store their public key string inside Redis.
+    // The token is the only source of truth for identity here — a client claiming
+    // any other username without a matching valid JWT is rejected outright.
     socket.on('register_user', async (data) => {
-        socket.username = data.username;
+        let decoded;
+        try {
+            decoded = jwt.verify((data || {}).token, JWT_SECRET);
+        } catch (err) {
+            socket.emit('auth_error', { error: 'Session expired or invalid. Please log in again.' });
+            socket.disconnect(true);
+            return;
+        }
+
+        socket.username = decoded.username;
+        data = { ...data, username: decoded.username };
         await redisClient.set(`user:${data.username}:socket`, socket.id);
         await redisClient.set(`user:${data.username}:pubkey`, data.publicKey);
+
+        // Cache this user's last-seen privacy preference in Redis so the hot presence
+        // paths below (and get_user_public_key/disconnect) never need a Postgres round trip.
+        let lastSeenVisible = true;
+        try {
+            const userRow = await pgPool.query('SELECT last_seen_visible FROM users WHERE username = $1', [data.username]);
+            if (userRow.rows.length) lastSeenVisible = userRow.rows[0].last_seen_visible;
+        } catch (err) {
+            console.error('Failed to load last_seen_visible:', err.message);
+        }
+        await redisClient.set(`user:${data.username}:lastSeenVisible`, lastSeenVisible ? 'true' : 'false');
 
         // 🌟 FORCE REDIS INITIALIZATION: Automatically mark them online in the database right away
         await redisClient.set(`user:${data.username}:online`, 'true');
@@ -310,7 +1958,7 @@ io.on('connection', (socket) => {
         io.emit('presence_broadcast_update', {
             username: data.username,
             online: true,
-            lastSeen: Date.now()
+            lastSeen: lastSeenVisible ? Date.now() : null
         });
 
         // Flush anything that arrived while this user was offline — new messages, edits,
@@ -326,6 +1974,20 @@ io.on('connection', (socket) => {
                 socket.emit('message_deleted_everyone', payload);
             } else if (payload.kind === 'reaction') {
                 socket.emit('message_reacted', payload);
+            } else if (payload.kind === 'status_delete') {
+                socket.emit('status_deleted', payload);
+            } else if (payload.kind === 'read_receipt') {
+                socket.emit('message_status_update', { id: payload.id, peer: payload.peer, status: payload.status });
+            } else if (payload.kind === 'group_message') {
+                socket.emit('receive_group_message', payload);
+            } else if (payload.kind === 'group_edit') {
+                socket.emit('group_message_edited', payload);
+            } else if (payload.kind === 'group_delete') {
+                socket.emit('group_message_deleted_everyone', payload);
+            } else if (payload.kind === 'group_reaction') {
+                socket.emit('group_message_reacted', payload);
+            } else if (payload.kind === 'group_read_receipt') {
+                socket.emit('group_message_status_update', { groupId: payload.groupId, id: payload.id, reader: payload.reader });
             } else {
                 socket.emit('receive_private_message', payload);
                 const senderSocketId = await redisClient.get(`user:${payload.sender}:socket`);
@@ -349,9 +2011,11 @@ io.on('connection', (socket) => {
         // 🌟 TARGETED STATUS CHECK: Fetch their real-time state flags out of Redis directly
         const isOnlineStr = await redisClient.get(`user:${username}:online`);
         const lastSeenStr = await redisClient.get(`user:${username}:lastSeen`);
-        
+        const lastSeenVisibleStr = await redisClient.get(`user:${username}:lastSeenVisible`);
+
         const online = isOnlineStr === 'true';
-        const lastSeen = lastSeenStr ? parseInt(lastSeenStr, 10) : Date.now();
+        const lastSeenVisible = lastSeenVisibleStr !== 'false'; // default to visible if never cached
+        const lastSeen = lastSeenVisible ? (lastSeenStr ? parseInt(lastSeenStr, 10) : Date.now()) : null;
 
         // Send a complete picture back to the requesting tab workspace
         callback(pubKey, { online, lastSeen });
@@ -359,6 +2023,16 @@ io.on('connection', (socket) => {
 
     // Route a locked payload to a specific socket ID destination
     socket.on('send_private_message', async (data) => {
+        if (!data.targetUsername) return;
+
+        // Messaging (including Status broadcasts) requires an accepted friend request —
+        // enforced here, not just hidden in the UI, so a modified client can't bypass it.
+        const friends = await areFriends(socket.username, data.targetUsername);
+        if (!friends) {
+            socket.emit('message_blocked', { targetUsername: data.targetUsername, reason: 'not_friends' });
+            return;
+        }
+
         const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
 
         const payload = {
@@ -367,7 +2041,10 @@ io.on('connection', (socket) => {
             sender: socket.username,
             encryptedMessage: data.encryptedMessage,
             replyToText: data.replyToText || null,
-            replyToId: data.replyToId || null
+            replyToId: data.replyToId || null,
+            forwarded: !!data.forwarded,
+            broadcast: !!data.broadcast,
+            status: !!data.status
         };
 
         if (targetSocketId) {
@@ -380,6 +2057,7 @@ io.on('connection', (socket) => {
             await queueForOfflineUser(data.targetUsername, payload);
             console.log(`📥 ${data.targetUsername} is offline — message queued for delivery`);
         }
+        if (!data.status) logAnalyticsEvent('message_sent', socket.username); // exclude Status broadcasts, which piggyback on this same relay
     });
 
     // Edit a previously-sent text message — same online/offline pattern as send_private_message
@@ -422,6 +2100,155 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Deleting your own Status removes it from every current friend's device too --
+    // same fan-out-to-every-friend delivery as posting one (see send_private_message
+    // callers on the client), just a delete instead of content, and same
+    // online/offline-queue pattern as everything else here.
+    socket.on('delete_status', async (data) => {
+        if (!data.statusId) return;
+        try {
+            const friendRows = await pgPool.query(
+                'SELECT user_a, user_b FROM friendships WHERE user_a = $1 OR user_b = $1',
+                [socket.username]
+            );
+            const payload = { kind: 'status_delete', id: data.statusId, sender: socket.username };
+            for (const row of friendRows.rows) {
+                const target = row.user_a === socket.username ? row.user_b : row.user_a;
+                const targetSocketId = await redisClient.get(`user:${target}:socket`);
+                if (targetSocketId) {
+                    io.to(targetSocketId).emit('status_deleted', payload);
+                } else {
+                    await queueForOfflineUser(target, payload);
+                }
+            }
+        } catch (err) {
+            console.error('delete_status failed:', err.message);
+        }
+    });
+
+    /* GROUP MESSAGING — the client pre-encrypts the same content separately for
+       each current member's public key (see encryptPayloadForUser calls in the
+       browser) and sends all of those ciphertexts in one shot as `recipients`; this
+       handler's only job is fan-out delivery to each named member, live or queued,
+       exactly like send_private_message does for a single recipient. The server
+       never sees plaintext and never stores the message itself, same as 1:1. */
+    socket.on('send_group_message', async (data) => {
+        if (!data.groupId || !data.id || !data.recipients || typeof data.recipients !== 'object') return;
+        const role = await getGroupRole(data.groupId, socket.username);
+        if (!role) return; // not a member -- silently drop, same posture as message_blocked below but nothing to notify
+        const group = await getGroupOrNull(data.groupId);
+        if (!group) return;
+        if (group.only_admins_can_send && role !== 'admin') {
+            socket.emit('group_message_blocked', { groupId: data.groupId, reason: 'admins_only' });
+            return;
+        }
+
+        for (const [targetUsername, encryptedMessage] of Object.entries(data.recipients)) {
+            if (targetUsername === socket.username) continue;
+            const payload = {
+                kind: 'group_message',
+                groupId: data.groupId,
+                id: data.id,
+                sender: socket.username,
+                encryptedMessage,
+                replyToText: data.replyToText || null,
+                replyToId: data.replyToId || null
+            };
+            const targetSocketId = await redisClient.get(`user:${targetUsername}:socket`);
+            if (targetSocketId) {
+                io.to(targetSocketId).emit('receive_group_message', payload);
+            } else {
+                await queueForOfflineUser(targetUsername, payload);
+            }
+        }
+        logAnalyticsEvent('group_message_sent', socket.username);
+    });
+
+    socket.on('edit_group_message', async (data) => {
+        if (!data.groupId || !data.id || !data.recipients) return;
+        const role = await getGroupRole(data.groupId, socket.username);
+        if (!role) return;
+
+        for (const [targetUsername, encryptedMessage] of Object.entries(data.recipients)) {
+            if (targetUsername === socket.username) continue;
+            const payload = { kind: 'group_edit', groupId: data.groupId, id: data.id, sender: socket.username, encryptedMessage };
+            const targetSocketId = await redisClient.get(`user:${targetUsername}:socket`);
+            if (targetSocketId) io.to(targetSocketId).emit('group_message_edited', payload);
+            else await queueForOfflineUser(targetUsername, payload);
+        }
+    });
+
+    socket.on('delete_group_message_everyone', async (data) => {
+        if (!data.groupId || !data.id) return;
+        const role = await getGroupRole(data.groupId, socket.username);
+        if (!role) return;
+
+        const members = await getGroupMembers(data.groupId);
+        const payload = { kind: 'group_delete', groupId: data.groupId, id: data.id, sender: socket.username };
+        for (const m of members) {
+            if (m.username === socket.username) continue;
+            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
+            if (targetSocketId) io.to(targetSocketId).emit('group_message_deleted_everyone', payload);
+            else await queueForOfflineUser(m.username, payload);
+        }
+    });
+
+    socket.on('react_group_message', async (data) => {
+        if (!data.groupId || !data.id) return;
+        const role = await getGroupRole(data.groupId, socket.username);
+        if (!role) return;
+
+        const members = await getGroupMembers(data.groupId);
+        const payload = { kind: 'group_reaction', groupId: data.groupId, id: data.id, sender: socket.username, emoji: data.emoji || null };
+        for (const m of members) {
+            if (m.username === socket.username) continue;
+            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
+            if (targetSocketId) io.to(targetSocketId).emit('group_message_reacted', payload);
+            else await queueForOfflineUser(m.username, payload);
+        }
+    });
+
+    // Aggregate read receipts: the reader already knows who sent each message
+    // (their own local history), so it tells each original sender directly rather
+    // than the server tracking per-message senders itself.
+    socket.on('mark_group_message_read', async (data) => {
+        if (!data.groupId || !Array.isArray(data.reads)) return;
+        const role = await getGroupRole(data.groupId, socket.username);
+        if (!role) return;
+
+        for (const { id, sender } of data.reads) {
+            if (!id || !sender || sender === socket.username) continue;
+            const payload = { groupId: data.groupId, id, reader: socket.username };
+            const senderSocketId = await redisClient.get(`user:${sender}:socket`);
+            if (senderSocketId) {
+                io.to(senderSocketId).emit('group_message_status_update', payload);
+            } else {
+                await queueForOfflineUser(sender, { kind: 'group_read_receipt', ...payload });
+            }
+        }
+    });
+
+    // Typing indicators, ephemeral like the 1:1 versions -- relay live to every
+    // other member currently online, never queued.
+    socket.on('group_typing_start', async (data) => {
+        if (!data.groupId) return;
+        const members = await getGroupMembers(data.groupId);
+        for (const m of members) {
+            if (m.username === socket.username) continue;
+            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
+            if (targetSocketId) io.to(targetSocketId).emit('group_typing_start', { groupId: data.groupId, sender: socket.username });
+        }
+    });
+    socket.on('group_typing_stop', async (data) => {
+        if (!data.groupId) return;
+        const members = await getGroupMembers(data.groupId);
+        for (const m of members) {
+            if (m.username === socket.username) continue;
+            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
+            if (targetSocketId) io.to(targetSocketId).emit('group_typing_stop', { groupId: data.groupId, sender: socket.username });
+        }
+    });
+
     // In-chat mini-games (invite/accept/move/reset/leave) are relayed live only,
     // just like typing indicators — never queued, since a stale move replayed after
     // the recipient comes back online minutes later wouldn't make sense.
@@ -433,13 +2260,53 @@ io.on('connection', (socket) => {
         }
     });
 
+    // PROFILE — profile data (about/interests/avatar/etc.) lives only on-device,
+    // encrypted at rest there, never on this server. To let a viewer see it, the
+    // server just relays a live request/response between the two sockets: the
+    // viewer asks, the profile owner's own client computes what that specific
+    // viewer is allowed to see (their per-field visibility rules) and sends back
+    // only that filtered subset. If the owner isn't online right now there's
+    // nothing to relay to, so the viewer is told immediately instead of hanging.
+    socket.on('request_profile', async (data) => {
+        if (!data || !data.targetUsername || !data.requestId) return;
+        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
+        if (!targetSocketId) {
+            socket.emit('profile_response', { requestId: data.requestId, fromUsername: data.targetUsername, online: false, profile: null });
+            return;
+        }
+        io.to(targetSocketId).emit('profile_requested', { requesterUsername: socket.username, requestId: data.requestId });
+    });
+
+    socket.on('submit_profile_response', async (data) => {
+        if (!data || !data.requesterUsername || !data.requestId) return;
+        const requesterSocketId = await redisClient.get(`user:${data.requesterUsername}:socket`);
+        if (requesterSocketId) {
+            io.to(requesterSocketId).emit('profile_response', {
+                requestId: data.requestId,
+                fromUsername: socket.username,
+                online: true,
+                profile: data.profile || null
+            });
+        }
+    });
+
     // NEARBY — anonymous, 24h-expiring matches with whoever else is online right now.
     // All handlers below relay live only (never queued), same rule as typing/game
     // events: a match only exists between two people who were just online together.
+    // Reported by the client when the Nearby tab is opened (after the browser's
+    // geolocation permission prompt) — coarse, short-lived, and never sent to other
+    // clients directly, only used server-side to compute distance for filtering.
+    socket.on('nearby_update_location', async (data) => {
+        const me = socket.username;
+        if (!me || !data || typeof data.lat !== 'number' || typeof data.lng !== 'number') return;
+        await redisClient.set(`user:${me}:geo`, JSON.stringify({ lat: data.lat, lng: data.lng }), { EX: NEARBY_GEO_TTL });
+    });
+
     socket.on('nearby_get_online_list', async (data, callback) => {
         if (typeof callback !== 'function') return;
         const me = socket.username;
         if (!me) return callback([]);
+        if (!data || typeof data.lat !== 'number' || typeof data.lng !== 'number') return callback([]);
 
         const onlineUsers = await redisClient.sMembers('online_users');
         const activePeers = await getActiveNearbyPeers(me);
@@ -447,6 +2314,12 @@ io.on('connection', (socket) => {
 
         const list = [];
         for (const target of candidates) {
+            const rawGeo = await redisClient.get(`user:${target}:geo`);
+            if (!rawGeo) continue; // hasn't opened Nearby / shared location recently — can't be placed within radius
+            const geo = JSON.parse(rawGeo);
+            const distance = haversineMiles(data.lat, data.lng, geo.lat, geo.lng);
+            if (distance > NEARBY_RADIUS_MILES) continue;
+
             const record = await getOrCreateNearbyAlias(me, target);
             list.push({ aliasId: record.aliasId, alias: record.alias, color: record.color });
         }
@@ -570,7 +2443,12 @@ io.on('connection', (socket) => {
         if (targetSocketId) io.to(targetSocketId).emit('typing_stop', { sender: socket.username });
     });
 
-    // Relay read receipts back to the original sender
+    // Relay read receipts back to the original sender -- same online/offline-queue
+    // pattern as messages/edits/deletes/reactions below. Previously this only ever
+    // reached the sender if they happened to be online at the exact moment the
+    // reader opened the chat; if they were offline, the fact that their message had
+    // already been read was silently dropped and never resurfaced, even after they
+    // reconnected. Queuing it means "already read" is durable, not a live-only signal.
     socket.on('mark_message_read', async (data) => {
         if (!data.peer || !Array.isArray(data.messageIds)) return;
         const originalSenderSocketId = await redisClient.get(`user:${data.peer}:socket`);
@@ -578,6 +2456,10 @@ io.on('connection', (socket) => {
             data.messageIds.forEach(id => {
                 io.to(originalSenderSocketId).emit('message_status_update', { id, peer: socket.username, status: 'read' });
             });
+        } else {
+            for (const id of data.messageIds) {
+                await queueForOfflineUser(data.peer, { kind: 'read_receipt', id, peer: socket.username, status: 'read' });
+            }
         }
     });
 
@@ -588,10 +2470,13 @@ io.on('connection', (socket) => {
         await redisClient.set(`user:${data.username}:online`, data.online ? 'true' : 'false');
         await redisClient.set(`user:${data.username}:lastSeen`, data.lastSeen.toString());
 
+        const lastSeenVisibleStr = await redisClient.get(`user:${data.username}:lastSeenVisible`);
+        const lastSeenVisible = lastSeenVisibleStr !== 'false';
+
         io.emit('presence_broadcast_update', {
             username: data.username,
             online: data.online,
-            lastSeen: data.lastSeen
+            lastSeen: lastSeenVisible ? data.lastSeen : null
         });
     });
 
@@ -605,10 +2490,13 @@ io.on('connection', (socket) => {
             await redisClient.del(`user:${socket.username}:socket`);
             await redisClient.sRem('online_users', socket.username);
 
+            const lastSeenVisibleStr = await redisClient.get(`user:${socket.username}:lastSeenVisible`);
+            const lastSeenVisible = lastSeenVisibleStr !== 'false';
+
             io.emit('presence_broadcast_update', {
                 username: socket.username,
                 online: false,
-                lastSeen: now
+                lastSeen: lastSeenVisible ? now : null
             });
 
             console.log(`🏃 User ${socket.username} has disconnected.`);

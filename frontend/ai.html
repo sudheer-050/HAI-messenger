@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HAI · AI Mode</title>
+<script>
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('hai_theme') || 'light');
+</script>
+<style>
+    :root {
+        --bg-main: #f4f6f8;
+        --bg-card: #ffffff;
+        --bg-sidebar: #ffffff;
+        --border: #e3e7eb;
+        --text-normal: #1c2430;
+        --text-muted: #6b7684;
+        --accent: #4a9ad9;
+        --accent-dim: rgba(74, 154, 217, 0.12);
+        --accent-red: #da373c;
+        --accent-red-dim: rgba(218, 55, 60, 0.1);
+        --accent-green: #23a55a;
+        --accent-green-dim: rgba(35, 165, 90, 0.1);
+        --shadow: 0 1px 3px rgba(20, 30, 40, 0.06), 0 1px 2px rgba(20, 30, 40, 0.04);
+        --code-bg: #f5f5f5;
+    }
+    :root[data-theme="dark"] {
+        --bg-main: #14181d;
+        --bg-card: #1c2229;
+        --bg-sidebar: #191e24;
+        --border: #2a323b;
+        --text-normal: #eef1f4;
+        --text-muted: #8b96a3;
+        --accent: #5ba8e6;
+        --accent-dim: rgba(91, 168, 230, 0.14);
+        --accent-red-dim: rgba(218, 55, 60, 0.16);
+        --accent-green-dim: rgba(35, 165, 90, 0.16);
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        --code-bg: #12161b;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; background: var(--bg-main); color: var(--text-normal);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    }
+    button, input, select, textarea { font-family: inherit; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-card); flex-shrink: 0; }
+    .topbar-left { display: flex; align-items: center; gap: 10px; }
+    .topbar-left h1 { font-size: 16px; margin: 0; font-weight: 700; }
+    .topbar-badge { font-size: 11px; background: var(--accent-dim); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    .btn { border: 1px solid var(--border); background: var(--bg-card); color: var(--text-normal); padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn:hover { background: var(--accent-dim); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { filter: brightness(1.08); }
+    .btn.danger { color: var(--accent-red); }
+    .btn.small { padding: 4px 9px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .app-body { display: flex; flex: 1; min-height: 0; }
+    .sidebar { width: 220px; flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border); padding: 14px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+    .sidebar-heading { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 6px; }
+    .file-pill { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; border: 1px solid var(--border); margin-bottom: 6px; }
+    .file-pill:hover { background: var(--accent-dim); }
+    .file-pill.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+    .file-pill-risk { font-size: 10px; color: var(--text-muted); display: block; margin-top: 1px; font-weight: 400; }
+    .sidebar-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .chat-scroll { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+    .chat-msg { max-width: 720px; }
+    .chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; padding: 10px 14px; border-radius: 14px 14px 4px 14px; font-size: 13.5px; }
+    .chat-msg.ai { align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border); padding: 12px 14px; border-radius: 14px 14px 14px 4px; font-size: 13.5px; box-shadow: var(--shadow); }
+    .chat-msg.system { align-self: center; color: var(--text-muted); font-size: 12px; text-align: center; }
+    .chat-msg.error { align-self: flex-start; background: var(--accent-red-dim); border: 1px solid var(--accent-red); color: var(--accent-red); padding: 10px 14px; border-radius: 12px; font-size: 13px; }
+
+    .edits-card { align-self: flex-start; max-width: 760px; width: 100%; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; box-shadow: var(--shadow); }
+    .edits-card-heading { font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .edit-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+    .edit-item-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--bg-main); font-size: 11.5px; }
+    .edit-badge { font-weight: 700; padding: 1px 7px; border-radius: 8px; font-size: 10.5px; }
+    .edit-badge.valid { background: var(--accent-green-dim); color: var(--accent-green); }
+    .edit-badge.invalid { background: var(--accent-red-dim); color: var(--accent-red); }
+    .diff-block { font-family: 'SF Mono', Consolas, monospace; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; padding: 8px 10px; max-height: 160px; overflow-y: auto; }
+    .diff-old { background: var(--accent-red-dim); color: var(--accent-red); text-decoration: line-through; opacity: 0.85; }
+    .diff-new { background: var(--accent-green-dim); color: var(--accent-green); }
+    .edits-card-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+    .composer { border-top: 1px solid var(--border); padding: 14px 24px; background: var(--bg-card); display: flex; gap: 10px; flex-shrink: 0; }
+    .composer textarea { flex: 1; resize: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; background: var(--bg-main); color: var(--text-normal); height: 46px; }
+    .composer textarea:focus { outline: none; border-color: var(--accent); }
+
+    .banner { margin: 20px 24px; padding: 12px 16px; border-radius: 10px; background: var(--accent-dim); color: var(--text-normal); font-size: 13px; line-height: 1.5; }
+    .banner code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(10, 14, 18, 0.45); align-items: center; justify-content: center; z-index: 100; }
+    .modal-overlay.open { display: flex; }
+    .modal-card { background: var(--bg-card); border-radius: 14px; padding: 20px; width: 460px; max-width: 92vw; max-height: 82vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    .modal-card h3 { margin: 0 0 12px; font-size: 16px; }
+    .backup-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; margin-bottom: 6px; }
+    .backup-row-note { font-weight: 600; }
+    .backup-row-meta { color: var(--text-muted); font-size: 11px; }
+
+    .gate-screen { display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 12px; text-align: center; padding: 20px; }
+    .gate-screen h2 { margin: 0; }
+    .gate-screen p { color: var(--text-muted); max-width: 380px; margin: 0; }
+    .typing-hint { align-self: flex-start; color: var(--text-muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<div id="gateScreen" class="gate-screen" style="display:none;">
+    <h2 id="gateTitle">Checking access…</h2>
+    <p id="gateMessage"></p>
+    <a class="btn primary" href="/" style="text-decoration:none; margin-top:8px;">Back to Chat</a>
+</div>
+
+<div id="appShell" style="display:none; flex-direction: column; height: 100%;">
+    <div class="topbar">
+        <div class="topbar-left">
+            <h1>HAI · AI Mode</h1>
+            <span class="topbar-badge">🤖 AI Mode</span>
+        </div>
+        <div class="topbar-right">
+            <button type="button" class="btn small" onclick="openBackupsModal()">🕘 Backups</button>
+            <a class="btn" href="/admin.html" style="text-decoration:none;">📊 Admin</a>
+            <a class="btn" href="/" style="text-decoration:none;">💬 Chat Mode</a>
+        </div>
+    </div>
+
+    <div class="app-body">
+        <div class="sidebar">
+            <div>
+                <div class="sidebar-heading">What you can ask for</div>
+                <div class="sidebar-note">
+                    Just describe the change -- you don't need to say where it lives. The AI reads the whole site and figures out which file(s) it belongs in, and can touch more than one at once if the change needs it.
+                </div>
+            </div>
+            <div>
+                <div class="sidebar-heading">Files it can edit</div>
+                <div class="file-pill" style="cursor:default;">
+                    index.html
+                    <span class="file-pill-risk">Frontend · live on refresh</span>
+                </div>
+                <div class="file-pill" style="cursor:default;">
+                    server.js
+                    <span class="file-pill-risk">Backend · restarts the server</span>
+                </div>
+            </div>
+            <div class="sidebar-note">
+                Every applied change is backed up first, so you can always restore a previous version from <b>Backups</b> above. Nothing reaches disk until you review the diff and click Apply.
+            </div>
+        </div>
+
+        <div class="main">
+            <div id="notConfiguredBanner" class="banner" style="display:none;">
+                AI Mode isn't configured yet. Run <code>claude setup-token</code> on your machine, add the resulting token as <code>CLAUDE_CODE_OAUTH_TOKEN</code> in your server's <code>.env</code> file, and restart the backend to turn it on.
+            </div>
+            <div id="chatScroll" class="chat-scroll"></div>
+            <div class="composer">
+                <textarea id="composerInput" placeholder="Describe the change you want, e.g. 'make the send button green'" onkeydown="handleComposerKeyDown(event)"></textarea>
+                <button type="button" class="btn primary" id="sendBtn" onclick="sendInstruction()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- BACKUPS -->
+<div class="modal-overlay" id="backupsModalOverlay">
+    <div class="modal-card">
+        <h3>Backups</h3>
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <button type="button" class="btn small" id="backupsFileBtn-index.html" onclick="selectBackupsFile('index.html')">index.html</button>
+            <button type="button" class="btn small" id="backupsFileBtn-server.js" onclick="selectBackupsFile('server.js')">server.js</button>
+        </div>
+        <div id="backupsList"></div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; margin-top:10px;">
+            <button type="button" class="btn" onclick="closeBackupsModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const token = localStorage.getItem('hai_session_token');
+    // One conversation, not per-file -- the AI sees every editable file on every
+    // turn and decides for itself where a change belongs.
+    let conversation = [];
+    let backupsFile = 'index.html';
+    let aiConfigured = true;
+    let sending = false;
+
+    async function authFetchJSON(url, method, body) {
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
+        return data;
+    }
+
+    function showGate(title, message) {
+        document.getElementById('gateTitle').innerText = title;
+        document.getElementById('gateMessage').innerText = message;
+        document.getElementById('gateScreen').style.display = 'flex';
+        document.getElementById('appShell').style.display = 'none';
+    }
+
+    async function init() {
+        if (!token) return showGate('Not logged in', 'Log into HAI first, then open AI Mode from the menu.');
+        showGate('Checking access…', '');
+
+        let me;
+        try {
+            me = await authFetchJSON('/api/auth/me', 'GET');
+        } catch (err) {
+            return showGate('Session expired', 'Please log back into HAI, then open AI Mode again.');
+        }
+        if (!me.isAdmin) return showGate('Access denied', 'Your account does not have admin access to AI Mode.');
+
+        document.getElementById('gateScreen').style.display = 'none';
+        document.getElementById('appShell').style.display = 'flex';
+
+        try {
+            const status = await authFetchJSON('/api/admin/ai/status', 'GET');
+            aiConfigured = status.configured;
+            document.getElementById('notConfiguredBanner').style.display = aiConfigured ? 'none' : 'block';
+            document.getElementById('sendBtn').disabled = !aiConfigured;
+        } catch (err) { /* leave enabled, the actual send will surface the real error */ }
+
+        renderChat();
+    }
+
+    function handleComposerKeyDown(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendInstruction();
+        }
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function renderChat() {
+        const scroll = document.getElementById('chatScroll');
+        if (!conversation.length) {
+            scroll.innerHTML = `<div class="chat-msg system">Describe the change you want in plain English -- no need to say which file. You'll see a diff before anything is saved.</div>`;
+            return;
+        }
+        scroll.innerHTML = '';
+        conversation.forEach(entry => scroll.appendChild(renderChatEntry(entry)));
+        scroll.scrollTop = scroll.scrollHeight;
+    }
+
+    function renderChatEntry(entry) {
+        if (entry.kind === 'user') {
+            const div = document.createElement('div');
+            div.className = 'chat-msg user';
+            div.innerText = entry.text;
+            return div;
+        }
+        if (entry.kind === 'error') {
+            const div = document.createElement('div');
+            div.className = 'chat-msg error';
+            div.innerText = entry.text;
+            return div;
+        }
+        if (entry.kind === 'system') {
+            const div = document.createElement('div');
+            div.className = 'chat-msg system';
+            div.innerText = entry.text;
+            return div;
+        }
+        // ai response, possibly with edits
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.flexDirection = 'column';
+        wrap.style.gap = '10px';
+
+        if (entry.explanation) {
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-msg ai';
+            bubble.innerText = entry.explanation;
+            wrap.appendChild(bubble);
+        }
+
+        if (entry.edits && entry.edits.length) {
+            const card = document.createElement('div');
+            card.className = 'edits-card';
+            const validCount = entry.edits.filter(e => e.valid).length;
+            card.innerHTML = `<div class="edits-card-heading">Proposed changes (${validCount}/${entry.edits.length} ready to apply)</div>`;
+
+            entry.edits.forEach((e, i) => {
+                const item = document.createElement('div');
+                item.className = 'edit-item';
+                item.innerHTML = `
+                    <div class="edit-item-header">
+                        <span>Change ${i + 1} · <code style="background:var(--code-bg); padding:1px 5px; border-radius:4px;">${escapeHtml(e.file || '?')}</code></span>
+                        <span class="edit-badge ${e.valid ? 'valid' : 'invalid'}">${e.valid ? '✓ Ready' : `⚠ Skipped (${e.occurrences} matches)`}</span>
+                    </div>
+                    <div class="diff-block"><span class="diff-old">${escapeHtml(e.old_string)}</span></div>
+                    <div class="diff-block"><span class="diff-new">${escapeHtml(e.new_string)}</span></div>
+                `;
+                card.appendChild(item);
+            });
+
+            if (!entry.applied) {
+                const actions = document.createElement('div');
+                actions.className = 'edits-card-actions';
+                const applyBtn = document.createElement('button');
+                applyBtn.className = 'btn primary small';
+                applyBtn.innerText = validCount ? `Apply ${validCount} Change${validCount === 1 ? '' : 's'}` : 'Nothing to apply';
+                applyBtn.disabled = !validCount;
+                applyBtn.onclick = () => applyEdits(entry);
+                const discardBtn = document.createElement('button');
+                discardBtn.className = 'btn small';
+                discardBtn.innerText = 'Discard';
+                discardBtn.onclick = () => { entry.applied = 'discarded'; renderChat(); };
+                actions.appendChild(applyBtn);
+                actions.appendChild(discardBtn);
+                card.appendChild(actions);
+            } else if (entry.applied === 'discarded') {
+                const note = document.createElement('div');
+                note.style.cssText = 'font-size:11.5px; color:var(--text-muted); margin-top:6px;';
+                note.innerText = 'Discarded — nothing was changed.';
+                card.appendChild(note);
+            } else {
+                const note = document.createElement('div');
+                note.style.cssText = 'font-size:11.5px; color:var(--accent-green); margin-top:6px; font-weight:600;';
+                const changedList = (entry.filesChanged || []).join(', ');
+                note.innerText = `✓ Applied to ${changedList}` + (entry.needsRestart ? ' — backend is restarting…' : ' — refresh the site to see it.');
+                card.appendChild(note);
+            }
+            wrap.appendChild(card);
+        }
+        return wrap;
+    }
+
+    async function sendInstruction() {
+        if (sending) return;
+        const input = document.getElementById('composerInput');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+
+        conversation.push({ kind: 'user', text });
+        renderChat();
+
+        sending = true;
+        document.getElementById('sendBtn').disabled = true;
+        const hint = document.createElement('div');
+        hint.className = 'typing-hint';
+        hint.id = 'typingHint';
+        hint.innerText = 'Thinking…';
+        document.getElementById('chatScroll').appendChild(hint);
+        document.getElementById('chatScroll').scrollTop = document.getElementById('chatScroll').scrollHeight;
+
+        try {
+            const claudeMessages = conversation.filter(h => h.kind === 'user' || h.kind === 'ai').map(h =>
+                h.kind === 'user' ? { role: 'user', content: h.text } : { role: 'assistant', content: JSON.stringify({ explanation: h.explanation, edits: (h.edits || []).map(e => ({ file: e.file, old_string: e.old_string, new_string: e.new_string })) }) }
+            );
+            const result = await authFetchJSON('/api/admin/ai/chat', 'POST', { messages: claudeMessages });
+            conversation.push({ kind: 'ai', explanation: result.explanation, edits: result.edits, applied: false });
+        } catch (err) {
+            conversation.push({ kind: 'error', text: err.message });
+        } finally {
+            sending = false;
+            document.getElementById('sendBtn').disabled = !aiConfigured;
+            const h = document.getElementById('typingHint');
+            if (h) h.remove();
+            renderChat();
+        }
+    }
+
+    async function applyEdits(entry) {
+        const validEdits = entry.edits.filter(e => e.valid).map(e => ({ file: e.file, old_string: e.old_string, new_string: e.new_string }));
+        if (!validEdits.length) return;
+        try {
+            const userMsg = [...conversation].reverse().find(h => h.kind === 'user');
+            const result = await authFetchJSON('/api/admin/ai/apply', 'POST', { edits: validEdits, note: userMsg ? userMsg.text : '' });
+            entry.applied = true;
+            entry.needsRestart = result.restarting;
+            entry.filesChanged = result.filesChanged;
+            renderChat();
+            if (result.restarting) waitForBackendRestart();
+        } catch (err) {
+            conversation.push({ kind: 'error', text: err.message });
+            renderChat();
+        }
+    }
+
+    function waitForBackendRestart() {
+        const scroll = document.getElementById('chatScroll');
+        const note = document.createElement('div');
+        note.className = 'chat-msg system';
+        note.id = 'restartNote';
+        note.innerText = 'Waiting for the backend to come back online…';
+        scroll.appendChild(note);
+        scroll.scrollTop = scroll.scrollHeight;
+
+        const poll = setInterval(async () => {
+            try {
+                await authFetchJSON('/api/admin/ai/status', 'GET');
+                clearInterval(poll);
+                const n = document.getElementById('restartNote');
+                if (n) n.innerText = '✓ Backend is back online.';
+            } catch (err) { /* still restarting, keep polling */ }
+        }, 1500);
+    }
+
+    /* BACKUPS */
+    function openBackupsModal() {
+        document.getElementById('backupsModalOverlay').classList.add('open');
+        selectBackupsFile(backupsFile);
+    }
+    async function selectBackupsFile(file) {
+        backupsFile = file;
+        document.getElementById('backupsFileBtn-index.html').classList.toggle('primary', file === 'index.html');
+        document.getElementById('backupsFileBtn-server.js').classList.toggle('primary', file === 'server.js');
+
+        const list = document.getElementById('backupsList');
+        list.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Loading…</div>';
+        try {
+            const data = await authFetchJSON(`/api/admin/ai/backups?file=${encodeURIComponent(file)}`, 'GET');
+            if (!data.backups.length) {
+                list.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">No backups yet for this file — one is made automatically the first time you apply a change.</div>';
+                return;
+            }
+            list.innerHTML = data.backups.map(b => `
+                <div class="backup-row">
+                    <div>
+                        <div class="backup-row-note">${escapeHtml(b.note || '(no note)')}</div>
+                        <div class="backup-row-meta">${new Date(b.timestamp).toLocaleString()}</div>
+                    </div>
+                    <button type="button" class="btn small" onclick="restoreBackup('${b.id}')">Restore</button>
+                </div>
+            `).join('');
+        } catch (err) {
+            list.innerHTML = `<div style="font-size:12px; color:var(--accent-red);">${escapeHtml(err.message)}</div>`;
+        }
+    }
+    function closeBackupsModal() {
+        document.getElementById('backupsModalOverlay').classList.remove('open');
+    }
+    async function restoreBackup(backupId) {
+        if (!confirm('Restore this version? Your current file will be backed up first, so this can also be undone.')) return;
+        try {
+            const result = await authFetchJSON('/api/admin/ai/restore', 'POST', { file: backupsFile, backupId });
+            closeBackupsModal();
+            conversation.push({ kind: 'system', text: `Restored a previous backup of ${backupsFile}.` });
+            renderChat();
+            if (result.restarting) waitForBackendRestart();
+        } catch (err) {
+            alert(err.message);
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
