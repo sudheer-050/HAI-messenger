@@ -3365,6 +3365,41 @@
             .profile-card, .trash-card { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
             .emoji-picker-panel { width: calc(100vw - 24px); right: 12px; }
         }
+
+        /* ── TOAST NOTIFICATIONS ──────────────────────────────────────────────── */
+        #haiToastContainer {
+            position: fixed;
+            top: 16px; right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            max-width: 320px;
+        }
+        .hai-toast {
+            background: var(--glass-strong);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--text-normal);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            word-break: break-word;
+            pointer-events: auto;
+            cursor: pointer;
+            animation: haiToastIn 0.25s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .hai-toast.error   { border-left: 3px solid var(--accent-red); }
+        .hai-toast.success { border-left: 3px solid var(--accent-green); }
+        .hai-toast.info    { border-left: 3px solid var(--accent-blue); }
+        @keyframes haiToastIn {
+            from { opacity: 0; transform: translateX(36px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
     </style>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
@@ -4180,6 +4215,32 @@
         <div class="voice-recorder-controls" id="voiceRecorderControls">
             <button type="button" class="game-primary-btn secondary" id="voicePauseResumeBtn" onclick="togglePauseVoiceCapture()">Pause</button>
             <button type="button" class="game-primary-btn" onclick="stopVoiceCaptureFromModal()">Stop</button>
+        </div>
+    </div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div id="haiToastContainer"></div>
+
+<!-- REUSABLE CONFIRM DIALOG -->
+<div class="modal-overlay" id="haiConfirmOverlay">
+    <div class="delete-choice-card">
+        <p id="haiConfirmMsg" style="font-size:13px;text-align:center;margin:0 0 12px;color:var(--text-normal);white-space:pre-line;"></p>
+        <button type="button" class="delete-choice-btn danger" id="haiConfirmOk">OK</button>
+        <button type="button" class="delete-choice-btn cancel" id="haiConfirmCancel">Cancel</button>
+    </div>
+</div>
+
+<!-- REUSABLE PROMPT DIALOG -->
+<div class="modal-overlay" id="haiPromptOverlay">
+    <div class="settings-edit-popup-card">
+        <p id="haiPromptMsg" style="font-size:13px;margin:0 0 10px;color:var(--text-normal);white-space:pre-line;"></p>
+        <div class="form-group" style="margin-bottom:12px;">
+            <input type="text" id="haiPromptInput" autocomplete="off">
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button type="button" class="btn-submit" style="margin-top:0;" id="haiPromptOk">OK</button>
+            <button type="button" class="settings-secondary-btn" id="haiPromptCancel">Cancel</button>
         </div>
     </div>
 </div>
@@ -6261,6 +6322,53 @@
         },
     ];
 
+    /* ── THEMED TOAST / CONFIRM / PROMPT — replaces native alert/confirm/prompt ── */
+    function showToast(msg, type) {
+        const c = document.getElementById('haiToastContainer');
+        if (!c) { console.warn(msg); return; }
+        const t = document.createElement('div');
+        t.className = 'hai-toast ' + (type || 'info');
+        t.textContent = msg;
+        c.appendChild(t);
+        const remove = () => {
+            t.style.transition = 'opacity 0.3s ease';
+            t.style.opacity = '0';
+            setTimeout(() => t.remove(), 320);
+        };
+        const timer = setTimeout(remove, 3500);
+        t.addEventListener('click', () => { clearTimeout(timer); remove(); });
+    }
+    function showConfirm(msg) {
+        return new Promise(resolve => {
+            document.getElementById('haiConfirmMsg').textContent = msg;
+            const ov = document.getElementById('haiConfirmOverlay');
+            ov.style.display = 'flex';
+            const done = r => { ov.style.display = 'none'; resolve(r); };
+            document.getElementById('haiConfirmOk').onclick    = () => done(true);
+            document.getElementById('haiConfirmCancel').onclick = () => done(false);
+            ov.onclick = e => { if (e.target === ov) done(false); };
+        });
+    }
+    function showPrompt(msg, defaultValue, inputType) {
+        return new Promise(resolve => {
+            document.getElementById('haiPromptMsg').textContent = msg;
+            const inp = document.getElementById('haiPromptInput');
+            inp.value = defaultValue || '';
+            inp.type = inputType || 'text';
+            const ov = document.getElementById('haiPromptOverlay');
+            ov.style.display = 'flex';
+            setTimeout(() => inp.focus(), 50);
+            const done = r => { ov.style.display = 'none'; resolve(r); };
+            document.getElementById('haiPromptOk').onclick     = () => done(inp.value);
+            document.getElementById('haiPromptCancel').onclick  = () => done(null);
+            ov.onclick = e => { if (e.target === ov) done(null); };
+            inp.onkeydown = e => {
+                if (e.key === 'Enter') done(inp.value);
+                if (e.key === 'Escape') done(null);
+            };
+        });
+    }
+
     /* ⚡ CHUNKED ARRAY BUFFER CONVERSION */
     function arrayBufferToBase64(buffer) {
         let binary = '';
@@ -6421,36 +6529,35 @@
     }
 
     /* 🌟 CLEAR ENTIRE CHAT HISTORY — reachable from a contact's profile card */
-    function clearActiveChatMessages(targetUsername) {
+    async function clearActiveChatMessages(targetUsername, noConfirm) {
         const username = targetUsername || currentActiveUser;
         if (!username || !conversationHistory[username]) return;
 
         if (conversationHistory[username].length === 0) {
-            return alert("This conversation is already empty.");
+            return showToast("This conversation is already empty.", 'info');
         }
 
-        if (confirm(`🧹 Move all messages in chat with @${username} to Trash?`)) {
-            conversationHistory[username].forEach(msg => {
-                trashHistory.push({
-                    id: 'trash-' + Math.random().toString(36).substr(2, 9),
-                    type: 'message',
-                    targetUser: username,
-                    data: msg,
-                    deletedAt: Date.now()
-                });
+        if (!noConfirm && !(await showConfirm(`🧹 Move all messages in chat with @${username} to Trash?`))) return;
+
+        conversationHistory[username].forEach(msg => {
+            trashHistory.push({
+                id: 'trash-' + Math.random().toString(36).substr(2, 9),
+                type: 'message',
+                targetUser: username,
+                data: msg,
+                deletedAt: Date.now()
             });
+        });
 
-            conversationHistory[username] = [];
-            persistConversations();
-            if (username === currentActiveUser) reloadChatHistoryScreen();
-
-            if (activeAuxPanel === 'profile') closeProfileCard();
-        }
+        conversationHistory[username] = [];
+        persistConversations();
+        if (username === currentActiveUser) reloadChatHistoryScreen();
+        if (activeAuxPanel === 'profile') closeProfileCard();
     }
 
     /* 🌟 ATTACHMENT & DOCUMENT UPLOAD HANDLERS */
     function triggerDocumentPicker() {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
         document.getElementById('chatAttachmentInput').click();
     }
 
@@ -6462,7 +6569,7 @@
     let cameraStream = null;
     let capturedPhotoDataUrl = null;
     async function triggerCameraCapture() {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             document.getElementById('chatCameraInput').click();
             return;
@@ -6524,7 +6631,7 @@
     }
 
     function triggerMediaPicker() {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
         document.getElementById('chatMediaInput').click();
     }
 
@@ -6578,7 +6685,7 @@
         { type: 'truthdare', title: 'Truth or Dare' }
     ];
     function openGamesMenu() {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
         const menu = document.getElementById('gamesMenuDropdown');
         const triggerEl = document.getElementById('attachToggleBtn');
         menu.innerHTML = '';
@@ -6603,8 +6710,8 @@
     }
 
     function shareLiveLocation() {
-        if (!currentActiveUser) return alert("Select a conversation first.");
-        if (!navigator.geolocation) return alert("Geolocation isn't supported on this browser.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
+        if (!navigator.geolocation) return showToast("Geolocation isn't supported on this browser.", 'info');
 
         navigator.geolocation.getCurrentPosition(
             (pos) => {
@@ -6615,7 +6722,7 @@
                     lng: pos.coords.longitude
                 });
             },
-            (err) => alert("Couldn't get your location: " + err.message),
+            (err) => showToast("Couldn't get your location: " + err.message, 'error'),
             { enableHighAccuracy: true, timeout: 10000 }
         );
     }
@@ -6665,13 +6772,13 @@
                 .then(base64Data => {
                     sendMediaMessage({ fileType: 'image', fileName: file.name, fileData: base64Data });
                 })
-                .catch(err => alert("Failed to process image: " + err.message))
+                .catch(err => showToast("Failed to process image: " + err.message, 'error'))
                 .finally(() => { attachmentInput.value = ""; });
             return;
         }
 
         if (file.size > MAX_DOCUMENT_BYTES) {
-            alert(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB — attachments are limited to ${MAX_DOCUMENT_BYTES / 1024 / 1024}MB.`);
+            showToast(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB — attachments are limited to ${MAX_DOCUMENT_BYTES / 1024 / 1024}MB.`, 'error');
             attachmentInput.value = "";
             return;
         }
@@ -6696,7 +6803,7 @@
     let voiceAnimFrame = null;
 
     function openVoiceRecorderModal() {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
         resetVoiceRecorderUI();
         document.getElementById('voiceRecorderModalOverlay').style.display = 'flex';
     }
@@ -6733,7 +6840,7 @@
         try {
             voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
-            alert("Microphone access denied or unsupported.");
+            showToast("Microphone access denied or unsupported.", 'error');
             return;
         }
 
@@ -6847,7 +6954,7 @@
     }
 
     async function sendMediaMessage(mediaPayload) {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
 
         let replyTextPayload = null;
         let replyIdPayload = null;
@@ -6877,7 +6984,7 @@
                         replyToId: replyIdPayload
                     });
                 } catch (err) {
-                    return alert("Failed to encrypt attachment: " + err.message);
+                    showToast("Failed to encrypt attachment: " + err.message, 'error'); return;
                 }
             }
 
@@ -7470,11 +7577,11 @@
         }
         if (mode === 'selected' || mode === 'exceptSelected') pickVisibilityPeople(fieldKey);
     }
-    function pickVisibilityPeople(fieldKey) {
+    async function pickVisibilityPeople(fieldKey) {
         const contacts = Object.keys(conversationHistory);
-        if (!contacts.length) return alert('You need at least one chat before picking specific people.');
+        if (!contacts.length) return showToast('You need at least one chat before picking specific people.', 'info');
         const current = (tempFieldVisibility[fieldKey] && tempFieldVisibility[fieldKey].list) || [];
-        const picked = prompt(`Enter usernames, comma-separated:\n(${contacts.join(', ')})`, current.join(', '));
+        const picked = await showPrompt(`Enter usernames, comma-separated:\n(${contacts.join(', ')})`, current.join(', '));
         if (picked === null) return;
         const list = [...new Set(picked.split(',').map(s => s.trim().toLowerCase()).filter(u => contacts.includes(u)))];
         if (!tempFieldVisibility[fieldKey]) tempFieldVisibility[fieldKey] = { mode: 'selected', list: [] };
@@ -7517,8 +7624,8 @@
     // saveProfileChanges/handleQuickPhotoChange), not messages -- removing one only
     // drops it from this album, it doesn't touch whichever photo is your CURRENT
     // avatar/cover if that happens to be the one deleted.
-    function deleteProfilePhoto(setAt) {
-        if (!confirm('Delete this photo from your profile?')) return;
+    async function deleteProfilePhoto(setAt) {
+        if (!(await showConfirm('Delete this photo from your profile?'))) return;
         const record = profileStoreCache[myUsername];
         if (!record || !record.photoHistory) return;
         record.photoHistory = record.photoHistory.filter(p => p.setAt !== setAt);
@@ -7736,9 +7843,9 @@
     function showEncryptionInfo(username) {
         const desc = document.getElementById('profileEncryptionDesc');
         const code = desc && desc.dataset.fingerprint;
-        alert(code
+        showToast(code
             ? `🔒 Messages to @${username} are end-to-end encrypted.\n\nSecurity code:\n${code}`
-            : `🔒 Messages to @${username} are end-to-end encrypted.\n\nStill fetching the security code -- try again in a moment.`);
+            : `🔒 Messages to @${username} are end-to-end encrypted.\n\nStill fetching the security code -- try again in a moment.`, 'info');
     }
 
     function jumpToStarredMessage(username, msgId) {
@@ -8005,8 +8112,8 @@
         const identity = document.getElementById('identityInput').value.trim();
         const password = document.getElementById('passwordInput').value.trim();
 
-        if (!identity) return alert("❌ Please enter your username or email.");
-        if (!password) return alert("❌ Please enter your password.");
+        if (!identity) return showToast("❌ Please enter your username or email.", 'error');
+        if (!password) return showToast("❌ Please enter your password.", 'error');
 
         const submitBtn = document.getElementById('authSubmitBtn');
 
@@ -8034,7 +8141,7 @@
                 }
                 startChatSession();
             } catch (err) {
-                alert(`❌ ${err.message}`);
+                showToast(`❌ ${err.message}`, 'error');
             } finally {
                 submitBtn.disabled = false;
             }
@@ -8042,9 +8149,9 @@
             const firstName = document.getElementById('firstNameInput').value.trim();
             const lastName = document.getElementById('lastNameInput').value.trim();
 
-            if (!firstName || !lastName) return alert("❌ Please enter both first name and last name.");
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity)) return alert("❌ Please enter a valid email address.");
-            if (password.length < 8) return alert("❌ Password must be at least 8 characters.");
+            if (!firstName || !lastName) return showToast("❌ Please enter both first name and last name.", 'error');
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity)) return showToast("❌ Please enter a valid email address.", 'error');
+            if (password.length < 8) return showToast("❌ Password must be at least 8 characters.", 'error');
 
             submitBtn.disabled = true;
             try {
@@ -8056,7 +8163,7 @@
                 document.getElementById('authStep2').style.display = 'block';
                 document.getElementById('verificationTargetText').innerText = `Sent 6-digit confirmation code to ${identity}`;
             } catch (err) {
-                alert(`❌ ${err.message}`);
+                showToast(`❌ ${err.message}`, 'error');
             } finally {
                 submitBtn.disabled = false;
             }
@@ -8073,16 +8180,16 @@
     }
     async function submitForgotPassword() {
         const identity = document.getElementById('forgotPasswordIdentityInput').value.trim();
-        if (!identity) return alert('❌ Please enter your username or email.');
+        if (!identity) return showToast('❌ Please enter your username or email.', 'error');
 
         const submitBtn = document.getElementById('forgotPasswordSubmitBtn');
         submitBtn.disabled = true;
         try {
             const data = await postAuthJSON('/api/auth/forgot-password', { identity });
             closeForgotPasswordModal();
-            alert(`✅ ${data.message}`);
+            showToast(`✅ ${data.message}`, 'success');
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         } finally {
             submitBtn.disabled = false;
         }
@@ -8099,9 +8206,9 @@
     async function submitMustChangePassword() {
         const newPassword = document.getElementById('mustChangeNewPassword').value.trim();
         const confirmPassword = document.getElementById('mustChangeConfirmPassword').value.trim();
-        if (!newPassword || !confirmPassword) return alert('❌ Please fill in both password fields.');
-        if (newPassword.length < 8) return alert('❌ New password must be at least 8 characters.');
-        if (newPassword !== confirmPassword) return alert('❌ New password and confirmation don\'t match.');
+        if (!newPassword || !confirmPassword) return showToast('❌ Please fill in both password fields.', 'error');
+        if (newPassword.length < 8) return showToast('❌ New password must be at least 8 characters.', 'error');
+        if (newPassword !== confirmPassword) return showToast('❌ New password and confirmation don\'t match.', 'error');
 
         const submitBtn = document.getElementById('mustChangePasswordSubmitBtn');
         submitBtn.disabled = true;
@@ -8119,9 +8226,9 @@
             switchAuthMode('login');
             document.getElementById('identityInput').value = loggedInUsername;
             document.getElementById('passwordInput').value = '';
-            alert('✅ Password updated. Please log in again with your new password.');
+            showToast('✅ Password updated. Please log in again with your new password.', 'success');
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         } finally {
             submitBtn.disabled = false;
         }
@@ -8135,9 +8242,9 @@
                 email: pendingRegistrationData.identity,
                 password: pendingRegistrationData.password
             });
-            alert(`🔑 A new verification code was sent to ${pendingRegistrationData.identity}`);
+            showToast(`🔑 A new verification code was sent to ${pendingRegistrationData.identity}`, 'info');
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         }
     }
 
@@ -8147,7 +8254,7 @@
         otpBoxes.forEach(box => enteredCode += box.value.trim());
 
         if (enteredCode.length !== 6) {
-            return alert("❌ Please enter the full 6-digit code.");
+            return showToast("❌ Please enter the full 6-digit code.", 'error');
         }
 
         try {
@@ -8155,7 +8262,7 @@
             document.getElementById('authStep2').style.display = 'none';
             document.getElementById('authStep3').style.display = 'block';
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         }
     }
 
@@ -8163,7 +8270,7 @@
         const handle = document.getElementById('uniqueHandleInput').value.trim();
 
         if (!/^[a-zA-Z0-9_]{3,20}$/.test(handle)) {
-            return alert("❌ Username must be 3-20 alphanumeric characters or underscores.");
+            return showToast("❌ Username must be 3-20 alphanumeric characters or underscores.", 'error');
         }
 
         try {
@@ -8177,7 +8284,7 @@
             };
             startChatSession();
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         }
     }
 
@@ -8250,7 +8357,7 @@
     }
 
     async function startChatSession() {
-        if (!window.crypto || !window.crypto.subtle) return alert("🔒 Browser blocked Crypto API!");
+        if (!window.crypto || !window.crypto.subtle) return showToast("🔒 Browser blocked Crypto API!", 'error');
 
         try {
             // Whether to show the "Admin Dashboard" entry point (see the hamburger
@@ -8483,7 +8590,7 @@
             });
 
             socket.on('nearby_request_declined', () => {
-                alert('Your Nearby connect request was declined.');
+                showToast('Your Nearby connect request was declined.', 'info');
             });
 
             socket.on('nearby_match_created', async (data) => {
@@ -8578,12 +8685,12 @@
 
             socket.on('message_blocked', (data) => {
                 if (data.reason === 'not_friends') {
-                    alert(`You need to be friends with @${data.targetUsername} to message them. Send a friend request first.`);
+                    showToast(`You need to be friends with @${data.targetUsername} to message them. Send a friend request first.`, 'info');
                     if (currentActiveUser === data.targetUsername) refreshFriendGateForActiveChat();
                 }
             });
             socket.on('group_message_blocked', (data) => {
-                if (data.reason === 'admins_only') alert('Only admins can send messages in this group.');
+                if (data.reason === 'admins_only') showToast('Only admins can send messages in this group.', 'info');
             });
 
             /* GROUP EVENTS — see the GROUPS comment near myGroups for the overall
@@ -8741,7 +8848,7 @@
             renderSidebarContacts();
             await tryJoinGroupFromUrl();
 
-        } catch (e) { alert("Cryptographic exception: " + e.message); }
+        } catch (e) { showToast("Cryptographic exception: " + e.message, 'error'); }
     }
 
     function handleInputKeyDown(event) {
@@ -9099,7 +9206,7 @@
             console.error("persistConversations failed:", err);
             if (!hasWarnedStorageFull) {
                 hasWarnedStorageFull = true;
-                alert("⚠️ Storage is full, so this message won't survive a page refresh. Delete some old attachments (Trash → Empty Trash) to free up space.");
+                showToast("⚠️ Storage is full, so this message won't survive a page refresh. Delete some old attachments (Trash → Empty Trash) to free up space.", 'error');
             }
         }
     }
@@ -9360,8 +9467,8 @@
         if (stillActive) showStatusFeed(username); else showStatusList();
     }
 
-    function deleteMyStatus(statusId) {
-        if (!confirm('Delete this status update? It will be removed from your device and from everyone who can currently see it.')) return;
+    async function deleteMyStatus(statusId) {
+        if (!(await showConfirm('Delete this status update? It will be removed from your device and from everyone who can currently see it.'))) return;
         myStatuses = myStatuses.filter(s => s.id !== statusId);
         persistMyStatuses();
         updateStatusFabState();
@@ -9423,11 +9530,11 @@
             pendingStatusPhoto = dataUrl;
             document.getElementById('statusPhotoPreview').src = dataUrl;
             document.getElementById('statusPhotoPreviewWrap').style.display = 'block';
-        }).catch(err => alert('Failed to process photo: ' + err.message));
+        }).catch(err => showToast('Failed to process photo: ' + err.message, 'error'));
     }
     async function submitPostStatus() {
         const text = document.getElementById('statusTextInput').value.trim();
-        if (!text && !pendingStatusPhoto) return alert('Add a photo or some text first.');
+        if (!text && !pendingStatusPhoto) return showToast('Add a photo or some text first.', 'info');
         if (editingStatusId) return submitEditStatus(text);
 
         // Only friends can receive anything (server enforces this too) -- filtering
@@ -9464,7 +9571,7 @@
             statusComposeReturnToList = false;
             showStatusList(); // aux panel is already open -- just refresh it
         } else if (!sentCount) {
-            alert('Posted, but you have no friends to share it with yet.');
+            showToast('Posted, but you have no friends to share it with yet.', 'info');
         }
     }
 
@@ -9510,7 +9617,7 @@
             {
                 iconName: 'image', title: 'View Photo', onClick: () => {
                     if (user && user.avatar) openPhotoLightbox(user.avatar);
-                    else alert('No profile photo set.');
+                    else showToast('No profile photo set.', 'info');
                 }
             },
             {
@@ -9779,7 +9886,7 @@
             if (currentActiveUser === username) refreshFriendGateForActiveChat();
             renderSidebarContacts();
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, 'error');
         }
     }
 
@@ -9789,7 +9896,7 @@
             outgoingFriendRequests = outgoingFriendRequests.filter(r => r.requestId !== requestId);
             if (currentActiveUser === username) refreshFriendGateForActiveChat();
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, 'error');
         }
     }
 
@@ -9850,7 +9957,7 @@
             sendBtn.type = 'button';
             sendBtn.className = 'friend-request-btn accept';
             sendBtn.innerText = 'Send Friend Request';
-            sendBtn.onclick = () => { ensureFriendRequestSent(currentActiveUser).then(refreshFriendGateForActiveChat).catch(err => alert(err.message)); };
+            sendBtn.onclick = () => { ensureFriendRequestSent(currentActiveUser).then(refreshFriendGateForActiveChat).catch(err => showToast(err.message, 'error')); };
             actionsEl.appendChild(sendBtn);
         }
     }
@@ -9888,7 +9995,7 @@
             if (activeAuxPanel === 'profile') openProfileCard(username);
             renderSidebarContacts();
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, 'error');
         }
     }
 
@@ -10097,12 +10204,12 @@
             pendingGroupAvatar = dataUrl;
             document.getElementById('createGroupPhotoPreview').src = dataUrl;
             document.getElementById('createGroupPhotoPreviewWrap').style.display = 'block';
-        }).catch(err => alert('Failed to process photo: ' + err.message));
+        }).catch(err => showToast('Failed to process photo: ' + err.message, 'error'));
     }
     async function submitCreateGroup() {
         const name = document.getElementById('createGroupNameInput').value.trim();
-        if (!name) return alert('Give your group a name.');
-        if (!selectedNewGroupMembers.size) return alert('Select at least one friend to add.');
+        if (!name) return showToast('Give your group a name.', 'info');
+        if (!selectedNewGroupMembers.size) return showToast('Select at least one friend to add.', 'info');
         const submitBtn = document.getElementById('createGroupSubmitBtn');
         submitBtn.disabled = true;
         try {
@@ -10122,7 +10229,7 @@
             renderSidebarContacts();
             switchConversationRoom(key);
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, 'error');
         } finally {
             submitBtn.disabled = false;
         }
@@ -10138,7 +10245,7 @@
         const group = myGroups[groupId];
         if (!group) return;
         if (pendingEditId) return submitGroupMessageEdit();
-        if (!canSendToGroup(groupId)) return alert('Only admins can send messages in this group.');
+        if (!canSendToGroup(groupId)) return showToast('Only admins can send messages in this group.', 'info');
 
         const text = document.getElementById('messageInput').value.trim();
         if (!text) return;
@@ -10324,10 +10431,10 @@
             const m = group.members.find(mm => mm.username === username);
             if (m) m.role = role;
             renderGroupInfoCard(groupId);
-        } catch (err) { alert(err.message); }
+        } catch (err) { showToast(err.message, 'error'); }
     }
-    function confirmRemoveGroupMember(groupId, username) {
-        if (!confirm(`Remove @${username} from this group?`)) return;
+    async function confirmRemoveGroupMember(groupId, username) {
+        if (!(await showConfirm(`Remove @${username} from this group?`))) return;
         removeGroupMember(groupId, username);
     }
     async function removeGroupMember(groupId, username) {
@@ -10336,10 +10443,10 @@
             const group = myGroups[groupId];
             group.members = group.members.filter(m => m.username !== username);
             renderGroupInfoCard(groupId);
-        } catch (err) { alert(err.message); }
+        } catch (err) { showToast(err.message, 'error'); }
     }
-    function confirmLeaveGroup(groupId) {
-        if (!confirm('Leave this group? You can only rejoin if someone adds you back or shares an invite link.')) return;
+    async function confirmLeaveGroup(groupId) {
+        if (!(await showConfirm('Leave this group? You can only rejoin if someone adds you back or shares an invite link.'))) return;
         leaveGroup(groupId);
     }
     async function leaveGroup(groupId) {
@@ -10352,7 +10459,7 @@
             if (currentActiveUser === groupKey(groupId)) currentActiveUser = null;
             renderSidebarContacts();
             reloadChatHistoryScreen();
-        } catch (err) { alert(err.message); }
+        } catch (err) { showToast(err.message, 'error'); }
     }
     async function toggleGroupPermission(groupId, field, value) {
         const group = myGroups[groupId];
@@ -10363,12 +10470,12 @@
         } catch (err) {
             group[field] = prev;
             renderGroupInfoCard(groupId);
-            alert(err.message);
+            showToast(err.message, 'error');
         }
     }
-    function promptEditGroupName(groupId) {
+    async function promptEditGroupName(groupId) {
         const group = myGroups[groupId];
-        const newName = prompt('Group name', group.name);
+        const newName = await showPrompt('Group name', group.name);
         if (!newName || !newName.trim() || newName.trim() === group.name) return;
         updateGroupDetails(groupId, { name: newName.trim() });
     }
@@ -10378,7 +10485,7 @@
         if (!file) return;
         compressImageFile(file, 400, 0.8).then(dataUrl => {
             updateGroupDetails(groupId, { avatar: dataUrl });
-        }).catch(err => alert('Failed to process photo: ' + err.message));
+        }).catch(err => showToast('Failed to process photo: ' + err.message, 'error'));
     }
     async function updateGroupDetails(groupId, fields) {
         try {
@@ -10388,7 +10495,7 @@
             renderGroupInfoCard(groupId);
             renderSidebarContacts();
             if (currentActiveUser === groupKey(groupId)) switchConversationRoom(groupKey(groupId));
-        } catch (err) { alert(err.message); }
+        } catch (err) { showToast(err.message, 'error'); }
     }
 
     /* ADD MEMBERS (reuses the Create Group member checklist UI/behavior against an
@@ -10440,7 +10547,7 @@
             myGroups[groupId].members = result.members;
             closeAddMembersModal();
             renderGroupInfoCard(groupId);
-        } catch (err) { alert(err.message); }
+        } catch (err) { showToast(err.message, 'error'); }
     }
 
     /* INVITE LINK */
@@ -10451,8 +10558,8 @@
             if (navigator.clipboard) {
                 await navigator.clipboard.writeText(link).catch(() => {});
             }
-            prompt('Invite link (copied if your browser allows it) -- expires in 7 days:', link);
-        } catch (err) { alert(err.message); }
+            showToast('Invite link copied to clipboard — expires in 7 days.', 'success');
+        } catch (err) { showToast(err.message, 'error'); }
     }
 
     /* Reached via a link like /?joinGroup=<code> -- redeemed once the user is
@@ -10469,7 +10576,7 @@
             renderSidebarContacts();
             switchConversationRoom(groupKey(result.group.id));
         } catch (err) {
-            alert('Could not join group: ' + err.message);
+            showToast('Could not join group: ' + err.message, 'error');
         }
     }
 
@@ -10721,18 +10828,18 @@
         removeBtn.style.display = isSet ? 'inline-block' : 'none';
     }
     async function setChatLockPin() {
-        const pin = prompt('Enter a new Chat Lock PIN (4+ digits):');
+        const pin = await showPrompt('Enter a new Chat Lock PIN (4+ digits):');
         if (!pin) return;
-        if (pin.length < 4) return alert('❌ PIN must be at least 4 characters.');
-        const confirmPin = prompt('Confirm the PIN:');
-        if (pin !== confirmPin) return alert("❌ PINs didn't match.");
+        if (pin.length < 4) return showToast('❌ PIN must be at least 4 characters.', 'error');
+        const confirmPin = await showPrompt('Confirm the PIN:');
+        if (pin !== confirmPin) return showToast("❌ PINs didn't match.", 'error');
         getMySettings().chat_lock_pin_hash = await sha256Hex(pin);
         persistProfileStore();
         renderChatLockStatus();
-        alert('✅ Chat Lock PIN set.');
+        showToast('✅ Chat Lock PIN set.', 'success');
     }
-    function removeChatLockPin() {
-        if (!confirm('Remove your Chat Lock PIN? Any locked chats will be unlocked.')) return;
+    async function removeChatLockPin() {
+        if (!(await showConfirm('Remove your Chat Lock PIN? Any locked chats will be unlocked.'))) return;
         delete getMySettings().chat_lock_pin_hash;
         Object.keys(conversationHistory).forEach(u => { conversationHistory[u]._locked = false; });
         lockedChatsRevealed = false;
@@ -10744,7 +10851,7 @@
     function headerMenuToggleLock() {
         document.getElementById('headerMenuDropdown').classList.remove('open');
         if (!currentActiveUser || !conversationHistory[currentActiveUser]) return;
-        if (!hasChatLockPin()) return alert('Set a Chat Lock PIN first in Settings → Chats.');
+        if (!hasChatLockPin()) return showToast('Set a Chat Lock PIN first in Settings → Chats.', 'info');
         conversationHistory[currentActiveUser]._locked = !conversationHistory[currentActiveUser]._locked;
         persistConversations();
         if (conversationHistory[currentActiveUser]._locked && !lockedChatsRevealed) {
@@ -10770,7 +10877,7 @@
         const pin = document.getElementById('chatLockUnlockInput').value;
         if (!pin) return;
         const hash = await sha256Hex(pin);
-        if (hash !== getMySettings().chat_lock_pin_hash) return alert('❌ Wrong PIN.');
+        if (hash !== getMySettings().chat_lock_pin_hash) return showToast('❌ Wrong PIN.', 'error');
         lockedChatsRevealed = true;
         closeChatLockUnlockModal();
         renderSidebarContacts();
@@ -10808,9 +10915,9 @@
         }
         try {
             await navigator.clipboard.writeText(shareText);
-            alert('✅ Invite link copied to clipboard.');
+            showToast('✅ Invite link copied to clipboard.', 'success');
         } catch (e) {
-            alert(shareText);
+            showToast(shareText, 'info');
         }
     }
 
@@ -10938,15 +11045,15 @@
     async function submitUpdateName() {
         const firstName = document.getElementById('settingsFirstName').value.trim();
         const lastName = document.getElementById('settingsLastName').value.trim();
-        if (!firstName || !lastName) return alert('❌ Please fill in both name fields.');
+        if (!firstName || !lastName) return showToast('❌ Please fill in both name fields.', 'error');
         try {
             await authFetchJSON('/api/auth/profile', 'PATCH', { firstName, lastName });
             applyLoggedInProfile(myUsername, { firstName, lastName });
             await loadAccountInfo();
             toggleNameEdit(false);
-            alert('✅ Name updated.');
+            showToast('✅ Name updated.', 'success');
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         }
     }
 
@@ -10954,28 +11061,28 @@
         const currentPassword = document.getElementById('settingsCurrentPassword').value.trim();
         const newPassword = document.getElementById('settingsNewPassword').value.trim();
         const confirmPassword = document.getElementById('settingsConfirmNewPassword').value.trim();
-        if (!currentPassword || !newPassword || !confirmPassword) return alert('❌ Please fill in all three password fields.');
-        if (newPassword !== confirmPassword) return alert('❌ New password and confirmation don\'t match.');
+        if (!currentPassword || !newPassword || !confirmPassword) return showToast('❌ Please fill in all three password fields.', 'error');
+        if (newPassword !== confirmPassword) return showToast('❌ New password and confirmation don\'t match.', 'error');
         try {
             await authFetchJSON('/api/auth/change-password', 'POST', { currentPassword, newPassword });
             togglePasswordEdit(false);
-            alert('✅ Password updated.');
+            showToast('✅ Password updated.', 'success');
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         }
     }
 
     async function beginDeleteAccount() {
-        const password = prompt('Type your password to permanently delete your account:');
+        const password = await showPrompt('Type your password to permanently delete your account:', '', 'password');
         if (!password) return;
-        if (!confirm('This permanently deletes your account. This cannot be undone. Continue?')) return;
+        if (!(await showConfirm('This permanently deletes your account. This cannot be undone. Continue?'))) return;
         try {
             await authFetchJSON('/api/auth/delete-account', 'POST', { password });
             closeSettingsModal();
             closeSecureTunnel();
-            alert('Your account has been deleted.');
+            showToast('Your account has been deleted.', 'success');
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
         }
     }
 
@@ -10986,7 +11093,7 @@
         try {
             await authFetchJSON('/api/auth/settings', 'PATCH', { lastSeenVisible: checked });
         } catch (err) {
-            alert(`❌ ${err.message}`);
+            showToast(`❌ ${err.message}`, 'error');
             document.getElementById('settingsLastSeenToggle').checked = !checked;
         }
     }
@@ -11053,7 +11160,7 @@
     function handleWallpaperUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-        if (file.size > 3 * 1024 * 1024) { alert('❌ Image must be under 3MB.'); return; }
+        if (file.size > 3 * 1024 * 1024) { showToast('❌ Image must be under 3MB.', 'error'); return; }
         const reader = new FileReader();
         reader.onload = (e) => selectWallpaper(e.target.result);
         reader.readAsDataURL(file);
@@ -11104,11 +11211,11 @@
             el.innerText = 'Not available';
         }
     }
-    function clearAllChatHistory() {
+    async function clearAllChatHistory() {
         const usernames = Object.keys(conversationHistory);
-        if (!usernames.length) return alert('No chat history to clear.');
-        if (!confirm('Move all conversations to Trash?')) return;
-        usernames.forEach(username => clearActiveChatMessages(username));
+        if (!usernames.length) return showToast('No chat history to clear.', 'info');
+        if (!(await showConfirm('Move all conversations to Trash?'))) return;
+        for (const username of usernames) await clearActiveChatMessages(username, true);
         updateStorageUsageDisplay();
     }
 
@@ -11143,7 +11250,7 @@
     }
 
     async function backupNow() {
-        const password = prompt('Enter your account password to encrypt this backup:');
+        const password = await showPrompt('Enter your account password to encrypt this backup:', '', 'password');
         if (!password) return;
 
         const includeMedia = (getMySettings().backup_content || 'text') === 'media';
@@ -11164,7 +11271,7 @@
             const base64Blob = btoa(JSON.stringify(backupBlob));
 
             if (base64Blob.length > BACKUP_MAX_BASE64_BYTES) {
-                alert('❌ Backup is too large to email. Try "Text only" mode or clear some old chats first.');
+                showToast('❌ Backup is too large to email. Try "Text only" mode or clear some old chats first.', 'error');
                 return;
             }
 
@@ -11174,9 +11281,9 @@
             });
             getMySettings().last_backup_at = Date.now();
             persistProfileStore();
-            alert('✅ Backup emailed to your account address.');
+            showToast('✅ Backup emailed to your account address.', 'success');
         } catch (err) {
-            alert(`❌ Backup failed: ${err.message}`);
+            showToast(`❌ Backup failed: ${err.message}`, 'error');
         }
     }
 
@@ -11203,9 +11310,9 @@
             try {
                 pendingRestoreBlob = JSON.parse(atob(e.target.result.trim()));
             } catch (err) {
-                return alert('❌ That file doesn\'t look like a valid HAI backup.');
+                showToast('❌ That file doesn\'t look like a valid HAI backup.', 'error'); return;
             }
-            const password = prompt('Enter the account password this backup was encrypted with:');
+            const password = await showPrompt('Enter the account password this backup was encrypted with:', '', 'password');
             if (!password) { pendingRestoreBlob = null; return; }
             await restoreFromBackup(password);
         };
@@ -11237,9 +11344,9 @@
             await persistConversations();
             renderSidebarContacts();
             pendingRestoreBlob = null;
-            alert(`✅ Restored ${mergedCount} message(s) from backup.`);
+            showToast(`✅ Restored ${mergedCount} message(s) from backup.`, 'success');
         } catch (err) {
-            alert('❌ Could not decrypt this backup — check the password and try again.');
+            showToast('❌ Could not decrypt this backup — check the password and try again.', 'error');
         }
     }
 
@@ -11377,9 +11484,9 @@
         renderTrashItems();
     }
 
-    function emptyEntireTrash() {
+    async function emptyEntireTrash() {
         if (trashHistory.length === 0) return;
-        if (confirm("⚠️ Are you sure you want to permanently delete ALL items in the trash? This action cannot be undone.")) {
+        if (await showConfirm("⚠️ Are you sure you want to permanently delete ALL items in the trash? This action cannot be undone.")) {
             trashHistory = [];
             persistConversations();
             renderTrashItems();
@@ -12048,7 +12155,7 @@
             renderSidebarContacts();
             switchConversationRoom(username);
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, 'error');
         } finally {
             submitBtn.disabled = false;
         }
@@ -12095,29 +12202,29 @@
             </div>
         `).join('');
     }
-    function createBroadcastList() {
+    async function createBroadcastList() {
         const contacts = Object.keys(conversationHistory);
-        if (!contacts.length) return alert('You need at least one chat before creating a broadcast list.');
-        const name = prompt('Name this broadcast list:');
+        if (!contacts.length) return showToast('You need at least one chat before creating a broadcast list.', 'info');
+        const name = await showPrompt('Name this broadcast list:');
         if (!name || !name.trim()) return;
-        const picked = prompt(`Enter usernames to include, comma-separated:\n(${contacts.join(', ')})`);
+        const picked = await showPrompt(`Enter usernames to include, comma-separated:\n(${contacts.join(', ')})`);
         if (!picked) return;
         const members = [...new Set(picked.split(',').map(s => s.trim().toLowerCase()).filter(u => contacts.includes(u)))];
-        if (!members.length) return alert('No valid contacts entered.');
+        if (!members.length) return showToast('No valid contacts entered.', 'error');
         const lists = getBroadcastLists();
         lists.push({ id: 'bl-' + Math.random().toString(36).substr(2, 9), name: name.trim(), members });
         saveBroadcastLists(lists);
         renderBroadcastLists();
     }
-    function deleteBroadcastList(id) {
-        if (!confirm('Delete this broadcast list?')) return;
+    async function deleteBroadcastList(id) {
+        if (!(await showConfirm('Delete this broadcast list?'))) return;
         saveBroadcastLists(getBroadcastLists().filter(l => l.id !== id));
         renderBroadcastLists();
     }
     async function sendToBroadcastList(id) {
         const list = getBroadcastLists().find(l => l.id === id);
         if (!list) return;
-        const text = prompt(`Send to "${list.name}" (${list.members.length} people):`);
+        const text = await showPrompt(`Send to "${list.name}" (${list.members.length} people):`);
         if (!text || !text.trim()) return;
 
         let sentCount = 0;
@@ -12140,7 +12247,7 @@
         renderSidebarContacts();
         if (currentActiveUser && list.members.includes(currentActiveUser)) reloadChatHistoryScreen();
         closeBroadcastListsModal();
-        alert(`Sent to ${sentCount} of ${list.members.length} contact(s).`);
+        showToast(`Sent to ${sentCount} of ${list.members.length} contact(s).`, 'success');
     }
 
     /* CLOSE FRIENDS — a flag on the contact, same storage pattern as _favorite/
@@ -12358,7 +12465,7 @@
     }
 
     function startGame(gameType) {
-        if (!currentActiveUser) return alert("Select a conversation first.");
+        if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
         activeGame = { type: gameType, peer: currentActiveUser, isHost: true, status: 'inviting' };
         socket.emit('game_event', { targetUsername: currentActiveUser, gameType, payload: { action: 'invite' } });
         syncInlineGameCard();
@@ -12398,7 +12505,7 @@
         if (!activeGame || activeGame.peer !== sender || activeGame.type !== gameType) return;
 
         if (payload.action === 'decline') {
-            alert(`${sender} declined the game.`);
+            showToast(`${sender} declined the game.`, 'info');
             activeGame = null;
         } else if (payload.action === 'accept') {
             activeGame.status = 'playing';
@@ -12408,7 +12515,7 @@
         } else if (payload.action === 'reset') {
             resetRoundState();
         } else if (payload.action === 'leave') {
-            alert(`${sender} left the game.`);
+            showToast(`${sender} left the game.`, 'info');
             activeGame = null;
         }
         syncInlineGameCard();
@@ -12826,7 +12933,7 @@
         const kp = await generateEphemeralKeypair();
         socket.emit('nearby_send_request', { toAliasId: aliasId, myEphemeralPubKey: kp.publicKeyB64 }, (res) => {
             if (!res || res.error) {
-                alert((res && res.error) || 'Could not send request.');
+                showToast((res && res.error) || 'Could not send request.', 'error');
                 if (btnEl) { btnEl.disabled = false; btnEl.innerText = 'Connect'; }
                 return;
             }
@@ -12844,7 +12951,7 @@
         pendingNearbyRequests[requestId] = { privateKeyJwk: kp.privateKeyJwk };
         socket.emit('nearby_request_response', { requestId, accept: true, myEphemeralPubKey: kp.publicKeyB64 }, (res) => {
             if (res && res.error) {
-                alert(res.error);
+                showToast(res.error, 'error');
                 delete pendingNearbyRequests[requestId];
             }
         });
@@ -12946,7 +13053,7 @@
         try {
             const encrypted = await encryptPayloadForUser(match.theirEphemeralPubKeyB64, text);
             socket.emit('nearby_send_message', { matchId, encryptedMessage: encrypted }, (res) => {
-                if (res && res.error) alert(res.error);
+                if (res && res.error) showToast(res.error, 'error');
             });
         } catch (err) {
             console.error('Nearby encryption failed:', err);
@@ -12969,7 +13076,7 @@
             document.getElementById('activeChatTargetDisplay').innerText = 'Select a conversation to start chatting';
             document.getElementById('chatPanel').classList.add('no-active-chat');
             document.body.classList.remove('mobile-chat-open');
-            alert('This anonymous chat has expired and been deleted.');
+            showToast('This anonymous chat has expired and been deleted.', 'info');
         }
         if (currentSidebarTab === 'nearby') renderNearbyPanel();
     }
@@ -13318,7 +13425,7 @@
 
     function scrollToOriginalMessage(msgId) {
         const targetElement = document.getElementById(`msg-node-${msgId}`);
-        if (!targetElement) return alert("Original message has been deleted or cannot be found.");
+        if (!targetElement) return showToast("Original message has been deleted or cannot be found.", 'info');
         
         targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         
@@ -13841,15 +13948,15 @@
         if (msg) navigator.clipboard.writeText(msg.text);
     }
 
-    function forwardMessagePrompt(id) {
+    async function forwardMessagePrompt(id) {
         const msg = conversationHistory[currentActiveUser].find(m => m.id === id);
         if (!msg) return;
-        const dest = (prompt("Enter target contact handle username to forward this text:") || "").trim().toLowerCase();
+        const dest = ((await showPrompt("Enter target contact handle username to forward this text:")) || "").trim().toLowerCase();
         if (!dest) return;
 
         socket.emit('get_user_public_key', dest, async (targetPubKeyBase64) => {
             if (!targetPubKeyBase64) {
-                return alert(`User "${dest}" was not found. Nothing was forwarded.`);
+                return showToast(`User "${dest}" was not found. Nothing was forwarded.`, 'error');
             }
 
             let encrypted = "";
@@ -13857,7 +13964,7 @@
                 encrypted = await encryptPayloadForUser(targetPubKeyBase64, msg.text);
                 socket.emit('send_private_message', { targetUsername: dest, encryptedMessage: encrypted, forwarded: true });
             } catch(e) {
-                return alert("Failed to encrypt message. Please try again.");
+                return showToast("Failed to encrypt message. Please try again.", 'error');
             }
 
             if (!conversationHistory[dest]) conversationHistory[dest] = [];
@@ -13868,7 +13975,7 @@
             persistConversations();
             
             if (dest === currentActiveUser) reloadChatHistoryScreen();
-            else alert(`Successfully forwarded to ${dest}!`);
+            else showToast(`Successfully forwarded to ${dest}!`, 'success');
         });
     }
 
@@ -13894,9 +14001,9 @@
     async function sendPrivateMessage() {
         if (currentNearbyMatchId) return sendNearbyMessage();
         if (isGroupChatKey(currentActiveUser)) return sendGroupTextMessage();
-        if (!currentActiveUser) return alert("Select a conversation path thread first.");
-        if (isUserBlocked(currentActiveUser)) return alert("You've blocked this user. Unblock them in Settings > Privacy to send messages.");
-        if (!friendsSet.has(currentActiveUser)) return alert("You need to be friends to message each other. Send a friend request first.");
+        if (!currentActiveUser) return showToast("Select a conversation path thread first.", 'info');
+        if (isUserBlocked(currentActiveUser)) return showToast("You've blocked this user. Unblock them in Settings > Privacy to send messages.", 'info');
+        if (!friendsSet.has(currentActiveUser)) return showToast("You need to be friends to message each other. Send a friend request first.", 'info');
         if (pendingEditId) return submitMessageEdit();
         const text = document.getElementById('messageInput').value.trim();
         if (!text) return;
@@ -13921,7 +14028,7 @@
 
         socket.emit('get_user_public_key', currentActiveUser, async (targetPubKeyBase64) => {
             if (!targetPubKeyBase64) {
-                alert(`"${currentActiveUser}" was not found. Your message wasn't sent.`);
+                showToast(`"${currentActiveUser}" was not found. Your message wasn't sent.`, 'error');
                 return;
             }
 
@@ -13937,7 +14044,7 @@
                 });
             } catch(err) {
                 console.error("Encryption failed:", err);
-                return alert("Failed to encrypt message. Please try again.");
+                return showToast("Failed to encrypt message. Please try again.", 'error');
             }
 
             const now = Date.now();
