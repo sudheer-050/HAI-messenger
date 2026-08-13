@@ -3508,7 +3508,6 @@
                             <button type="button" onclick="hamburgerMenuSettings()"><span data-icon="settings"></span> Settings</button>
                             <button type="button" onclick="hamburgerMenuTrash()"><span data-icon="trash"></span> Trash</button>
                             <button type="button" id="hamburgerAdminBtn" style="display:none;" onclick="window.location.href='/admin.html'"><span data-icon="shield"></span> Admin Dashboard</button>
-                            <button type="button" id="hamburgerAiModeBtn" style="display:none;" onclick="window.location.href='/ai.html'"><span data-icon="sparkle"></span> AI Mode</button>
                             <button type="button" onclick="hamburgerMenuLogout()"><span data-icon="power"></span> Logout</button>
                         </div>
                     </div>
@@ -8262,8 +8261,6 @@
                 isAdmin = !!me.isAdmin;
                 const btn = document.getElementById('hamburgerAdminBtn');
                 if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
-                const aiBtn = document.getElementById('hamburgerAiModeBtn');
-                if (aiBtn) aiBtn.style.display = isAdmin ? 'flex' : 'none';
             }).catch(() => {});
 
             await loadProfileStore();

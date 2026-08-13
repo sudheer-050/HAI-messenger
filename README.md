@@ -16,7 +16,6 @@ A self-hosted, end-to-end encrypted chat app. Single-file PWA frontend, a small 
 - **Rich media** — photos (with in-app camera capture), voice notes (with live waveform + playback preview before sending), documents, live location sharing.
 - **In-chat mini-games** — Tic Tac Toe, Stone Paper Scissors, Truth or Dare, played live against whoever you're chatting with.
 - **Nearby** — anonymous, 24-hour self-destructing chats with whoever else is online right now. Neither side ever sees the other's real identity; matches and their messages are permanently deleted after 24 hours, both server-side and on both clients.
-- **Ask AI** — an in-chat assistant panel backed by your own local [Ollama](https://ollama.com) instance, so the model call never leaves your machine. Answers questions about the open conversation, searches the web (DuckDuckGo) when it needs current information, and has a hard-coded refusal for anything outside that scope.
 - **Installable PWA** — add to home screen on mobile or desktop for a native-feeling app, with offline-safe caching and mobile-first gestures (swipe to delete/favorite, morph transitions).
 - **Favorites & unread badges** — star chats, filter by unread/favorites, and see at a glance whether a new notification is a message or a game invite.
 - **Internet access via Cloudflare Tunnel** — expose your local instance over HTTPS without opening any ports, protected by HTTP Basic Auth.
@@ -25,9 +24,8 @@ A self-hosted, end-to-end encrypted chat app. Single-file PWA frontend, a small 
 
 | Component | Role |
 |---|---|
-| Node.js / Express / Socket.IO | Backend — real-time relay, offline message queue, Ask AI proxy |
+| Node.js / Express / Socket.IO | Backend — real-time relay, offline message queue |
 | Redis | Online presence, offline message queue, Nearby match/alias state |
-| Ollama (external, runs on your host) | Powers the Ask AI assistant |
 | Cloudflare Tunnel (`cloudflared`) | Optional internet exposure without port forwarding |
 | Vanilla JS, single-file HTML/CSS/JS | Frontend — no build step |
 
@@ -35,7 +33,7 @@ A self-hosted, end-to-end encrypted chat app. Single-file PWA frontend, a small 
 
 ## Setup
 
-**Requirements:** Docker Desktop, and optionally [Ollama](https://ollama.com) running on your host machine if you want the Ask AI feature (any model works — set `OLLAMA_MODEL` in `backend/server.js` to match whichever you've pulled).
+**Requirements:** Docker Desktop.
 
 1. Clone the repo and copy the environment template:
    ```bash

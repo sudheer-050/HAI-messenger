@@ -28,7 +28,7 @@ services:
 
   backend:
     build: ./backend
-    restart: unless-stopped   # AI Mode restarts this process after applying a server.js edit -- needs Docker to bring it straight back up
+    restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -39,14 +39,9 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379
       - TRANSLATE_URL=http://libretranslate:5000
-      - OLLAMA_URL=http://host.docker.internal:11434
       - RESEND_API_KEY=${RESEND_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - ADMIN_USERNAMES=${ADMIN_USERNAMES}
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
       - redis
