@@ -639,6 +639,32 @@
         .chat-area.nearby-mode .chat-header-actions,
         .chat-area.nearby-mode #attachToggleBtn { display: none; }
 
+        .nearby-ephemeral-banner {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 16px;
+            background: rgba(224, 180, 0, 0.12);
+            border-bottom: 1px solid rgba(224, 180, 0, 0.28);
+            font-size: 12px;
+            color: var(--accent-gold);
+            font-weight: 600;
+            flex-shrink: 0;
+            letter-spacing: 0.01em;
+        }
+        :root[data-theme="dark"] .nearby-ephemeral-banner {
+            background: rgba(224, 180, 0, 0.07);
+            border-bottom-color: rgba(224, 180, 0, 0.18);
+        }
+        .chat-area.nearby-mode .nearby-ephemeral-banner { display: flex; }
+        .nearby-ephemeral-banner-countdown {
+            font-size: 11px;
+            font-weight: 700;
+            opacity: 0.85;
+            white-space: nowrap;
+        }
+
         /* IN-PANEL AUX VIEWS (Profile/Trash/Settings) — hidden by default; when one is
            active, aux-mode hides the normal chat furniture and the matching view shows,
            reusing the same open/close plumbing (animateChatOpen/Close, mobile-chat-open)
@@ -2221,6 +2247,7 @@
            message list (see syncInlineGameCard), not a modal, so it reads as part of
            the conversation instead of interrupting it. */
         .inline-game-card {
+            --game-accent: var(--accent-blue);
             width: 100%;
             max-width: 340px;
             margin: 12px auto;
@@ -2255,14 +2282,15 @@
             padding: 11px;
             border-radius: 12px;
             border: none;
-            background: var(--accent-blue);
+            background: var(--game-accent);
             color: #fff;
             font-family: var(--font-stack);
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
+            transition: filter 0.15s ease;
         }
-        .game-primary-btn:hover { background: var(--accent-blue-hover); }
+        .game-primary-btn:hover { filter: brightness(0.85); }
         .game-primary-btn.secondary { background: var(--input-bg); color: var(--text-normal); }
         .game-primary-btn.secondary:hover { background: var(--border-color); }
 
@@ -2293,6 +2321,12 @@
         .camera-retake-send-row { display: none; gap: 8px; }
         .camera-retake-send-row .game-primary-btn { flex: 1; }
 
+        @keyframes tttWinPop {
+            0% { transform: scale(0.82); opacity: 0.5; }
+            65% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
         .ttt-grid { display: grid; gap: 6px; }
         .ttt-cell {
             aspect-ratio: 1;
@@ -2308,7 +2342,7 @@
             justify-content: center;
         }
         .ttt-cell:disabled { cursor: default; }
-        .ttt-cell.win { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+        .ttt-cell.win { background: var(--game-accent); color: #fff; border-color: var(--game-accent); animation: tttWinPop 0.35s cubic-bezier(0.34,1.56,0.64,1) both; }
 
         .rps-options { display: flex; gap: 8px; justify-content: center; }
         .rps-option-btn {
@@ -2320,16 +2354,19 @@
             border-radius: 12px;
             border: 1px solid var(--border-color);
             background: var(--input-bg);
-            font-size: 26px;
             cursor: pointer;
             color: var(--text-normal);
             text-transform: capitalize;
             font-family: var(--font-stack);
+            font-size: 11px;
+            transition: background 0.15s ease, color 0.15s ease;
         }
+        .rps-option-btn .icon { width: 32px; height: 32px; }
         .rps-option-btn span { font-size: 11px; }
-        .rps-option-btn:hover { background: var(--accent-blue); color: #fff; }
+        .rps-option-btn:hover { background: var(--game-accent); color: #fff; }
         .rps-reveal { display: flex; align-items: center; justify-content: center; gap: 16px; }
-        .rps-choice-display { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 34px; }
+        .rps-choice-display { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .rps-choice-display .icon { width: 40px; height: 40px; }
         .rps-choice-display span { font-size: 11px; color: var(--text-muted); }
         .rps-vs { font-size: 12px; color: var(--text-muted); font-weight: 700; }
 
@@ -3566,6 +3603,11 @@
             </div>
         </div>
 
+        <div class="nearby-ephemeral-banner" id="nearbyEphemeralBanner">
+            <span>&#x1F47B; Anonymous chat &mdash; no identity shared</span>
+            <span class="nearby-ephemeral-banner-countdown" id="nearbyBannerCountdown"></span>
+        </div>
+
         <div class="pinned-msg-banner" id="pinnedMessageBanner" style="display: none;">
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="display: inline-flex; align-items: center; gap: 4px;"><span data-icon="pin"></span> Pinned:</span>
@@ -4253,6 +4295,7 @@
     // NEARBY — anonymous 24h matches, kept entirely separate from conversationHistory
     let nearbyMatches = {}; // matchId -> { alias, color, expiresAt, myEphemeralPrivateKeyJwk, theirEphemeralPubKeyB64, messages }
     let currentNearbyMatchId = null; // mutually exclusive with currentActiveUser
+    let nearbyCountdownInterval = null; // interval that keeps the banner/header countdown live
     let myGeoLocation = null; // {lat, lng, obtainedAt} — only ever sent to the server, never to other clients
     let activeAuxPanel = null; // 'profile' | 'trash' | 'settings' | null — which in-panel aux view (if any) is showing
     // LIVE PROFILE FETCHING — profile data lives only on-device (see profileStoreCache),
@@ -6336,7 +6379,10 @@
         noEmoji: '<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>',
         users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
         link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-        crown: '<path d="m2 20 1.5-9L8 15l4-8 4 8 4.5-4L22 20z"/><line x1="2" y1="20" x2="22" y2="20"/>'
+        crown: '<path d="m2 20 1.5-9L8 15l4-8 4 8 4.5-4L22 20z"/><line x1="2" y1="20" x2="22" y2="20"/>',
+        rpsRock: '<ellipse cx="12" cy="13" rx="7" ry="6"/><path d="M8.5 7.5c0-2 1.6-3.5 3.5-3.5s3.5 1.5 3.5 3.5"/>',
+        rpsPaper: '<rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/>',
+        rpsScissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="13.47" y1="14.47" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>'
     };
     function icon(name, extraClass) {
         return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -12349,6 +12395,7 @@
        replayed minutes later wouldn't make sense. First draft covering four games —
        intentionally simple rulesets, easy to extend. */
     const GAME_NAMES = { tictactoe: 'Tic Tac Toe', rps: 'Stone Paper Scissors', truthdare: 'Truth or Dare' };
+    const GAME_ACCENTS = { tictactoe: 'var(--accent-blue)', rps: 'var(--accent-green)', truthdare: 'var(--accent-gold)' };
     let activeGame = null;
     let pendingGameInvite = null;
 
@@ -12521,7 +12568,7 @@
     }
 
     const RPS_OPTIONS = ['rock', 'paper', 'scissors'];
-    const RPS_EMOJI = { rock: '🪨', paper: '📄', scissors: '✂️' };
+    const RPS_ICON_NAMES = { rock: 'rpsRock', paper: 'rpsPaper', scissors: 'rpsScissors' };
     function resolveRps(a, b) {
         if (a === b) return 'draw';
         if ((a === 'rock' && b === 'scissors') || (a === 'paper' && b === 'rock') || (a === 'scissors' && b === 'paper')) return 'win';
@@ -12633,6 +12680,7 @@
             return;
         }
 
+        if (showGame) el.style.setProperty('--game-accent', GAME_ACCENTS[activeGame.type] || 'var(--accent-blue)');
         el.innerHTML = showGame ? renderGameCardHtml(activeGame) : renderInviteCardHtml();
         if (el.parentNode !== container || container.lastElementChild !== el) {
             container.appendChild(el);
@@ -12650,7 +12698,8 @@
         g.board.forEach((cell, idx) => {
             const isWinCell = g.winningLine && g.winningLine.includes(idx);
             const disabled = cell || g.winner || !g.myTurn;
-            grid += `<button type="button" class="ttt-cell ${isWinCell ? 'win' : ''}" ${disabled ? 'disabled' : ''} onclick="ticTacToeCellClick(${idx})">${cell || ''}</button>`;
+            const winStyle = isWinCell ? ` style="animation-delay:${g.winningLine.indexOf(idx) * 90}ms"` : '';
+            grid += `<button type="button" class="ttt-cell ${isWinCell ? 'win' : ''}"${winStyle} ${disabled ? 'disabled' : ''} onclick="ticTacToeCellClick(${idx})">${cell || ''}</button>`;
         });
         grid += `</div>`;
 
@@ -12664,16 +12713,16 @@
         if (g.roundResult) {
             const resultText = g.roundResult === 'draw' ? "It's a draw!" : (g.roundResult === 'win' ? 'You win this round! 🎉' : `${g.peer} wins this round.`);
             inner += `<div class="rps-reveal">
-                <div class="rps-choice-display">${RPS_EMOJI[g.myPick]}<span>You</span></div>
+                <div class="rps-choice-display">${icon(RPS_ICON_NAMES[g.myPick])}<span>You</span></div>
                 <div class="rps-vs">vs</div>
-                <div class="rps-choice-display">${RPS_EMOJI[g.oppPick]}<span>${g.peer}</span></div>
+                <div class="rps-choice-display">${icon(RPS_ICON_NAMES[g.oppPick])}<span>${g.peer}</span></div>
             </div>
             <p class="game-status-text">${resultText}</p>
             <button type="button" class="game-primary-btn" onclick="playAgain()">Play Again</button>`;
         } else if (g.myPick) {
             inner += `<p class="game-status-text">Waiting for ${g.peer} to choose...</p>`;
         } else {
-            inner += `<div class="rps-options">${RPS_OPTIONS.map(o => `<button type="button" class="rps-option-btn" onclick="rpsPick('${o}')">${RPS_EMOJI[o]}<span>${o}</span></button>`).join('')}</div>`;
+            inner += `<div class="rps-options">${RPS_OPTIONS.map(o => `<button type="button" class="rps-option-btn" onclick="rpsPick('${o}')">${icon(RPS_ICON_NAMES[o])}<span>${o}</span></button>`).join('')}</div>`;
         }
         return inner;
     }
@@ -12719,6 +12768,23 @@
         const h = Math.floor(msLeft / 3600000);
         const m = Math.floor((msLeft % 3600000) / 60000);
         return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function stopNearbyCountdownInterval() {
+        if (nearbyCountdownInterval !== null) {
+            clearInterval(nearbyCountdownInterval);
+            nearbyCountdownInterval = null;
+        }
+    }
+
+    function refreshNearbyHeaderAndBanner() {
+        const match = nearbyMatches[currentNearbyMatchId];
+        if (!match) return;
+        const countdown = formatNearbyCountdown(match.expiresAt);
+        const bannerEl = document.getElementById('nearbyBannerCountdown');
+        if (bannerEl) bannerEl.textContent = `Expires in ${countdown}`;
+        const sub = document.querySelector('#activeChatTargetDisplay .nearby-header-sub');
+        if (sub) sub.textContent = `Anonymous · expires in ${countdown}`;
     }
 
     // Coarse, short-lived location used only to filter Nearby to people within
@@ -12920,10 +12986,17 @@
                 <div class="header-recipient-avatar" style="background: ${match.color}; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700;">?</div>
                 <div>
                     <h2 style="margin: 0; font-size: 20px; font-weight: 700;">${match.alias}</h2>
-                    <span style="font-size: 11px; color: var(--text-muted);">Anonymous · expires in ${formatNearbyCountdown(match.expiresAt)}</span>
+                    <span class="nearby-header-sub" style="font-size: 11px; color: var(--text-muted);">Anonymous · expires in ${formatNearbyCountdown(match.expiresAt)}</span>
                 </div>
             </div>
         `;
+
+        // Seed and start live countdown
+        const bannerEl = document.getElementById('nearbyBannerCountdown');
+        if (bannerEl) bannerEl.textContent = `Expires in ${formatNearbyCountdown(match.expiresAt)}`;
+        stopNearbyCountdownInterval();
+        nearbyCountdownInterval = setInterval(refreshNearbyHeaderAndBanner, 30000);
+
         document.getElementById('emojiPicker').style.display = 'none';
         emojiPickerReactionTarget = null;
         cancelReplyContext();
@@ -12963,6 +13036,7 @@
         delete nearbyMatches[matchId];
         persistNearbyMatches();
         if (currentNearbyMatchId === matchId) {
+            stopNearbyCountdownInterval();
             currentNearbyMatchId = null;
             document.getElementById('chatPanel').classList.remove('nearby-mode');
             document.getElementById('messages').innerHTML = '';
@@ -13180,6 +13254,7 @@
 
     function exitMobileChatView() {
         if (currentNearbyMatchId) {
+            stopNearbyCountdownInterval();
             currentNearbyMatchId = null;
             const chatPanel = document.getElementById('chatPanel');
             chatPanel.classList.remove('nearby-mode');
@@ -13236,6 +13311,7 @@
         // animation opens from exactly where the tapped row was on screen.
         const originRect = triggerRowEl ? triggerRowEl.getBoundingClientRect() : null;
         currentActiveUser = username;
+        stopNearbyCountdownInterval();
         currentNearbyMatchId = null; // mutually exclusive with a regular chat
 
         const panel = document.getElementById('chatPanel');
