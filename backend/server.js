@@ -2168,23 +2168,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Manual presence status updates coming from frontend hooks
-    socket.on('update_presence_status', async (data) => {
-        if (!data.username) return;
-
-        await redisClient.set(`user:${data.username}:online`, data.online ? 'true' : 'false');
-        await redisClient.set(`user:${data.username}:lastSeen`, data.lastSeen.toString());
-
-        const lastSeenVisibleStr = await redisClient.get(`user:${data.username}:lastSeenVisible`);
-        const lastSeenVisible = lastSeenVisibleStr !== 'false';
-
-        io.emit('presence_broadcast_update', {
-            username: data.username,
-            online: data.online,
-            lastSeen: lastSeenVisible ? data.lastSeen : null
-        });
-    });
-
     // Handle session termination cleanups
     socket.on('disconnect', async () => {
         if (socket.username) {
