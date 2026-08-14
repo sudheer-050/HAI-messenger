@@ -13890,6 +13890,17 @@
 
             container.appendChild(buildBubbleNode(msg));
         });
+
+        if (!conversationHistory[currentActiveUser].length) {
+            const empty = document.createElement('div');
+            empty.className = 'contacts-empty-state';
+            const isGroup = isGroupChatKey(currentActiveUser);
+            empty.innerHTML = isGroup
+                ? `${icon('chatBubble')}<p>No messages yet.</p><span>Be the first to say hi to the group!</span>`
+                : `${icon('chatBubble')}<p>No messages yet.</p><span>Say hi to start the conversation!</span>`;
+            container.appendChild(empty);
+        }
+
         syncInlineGameCard();
         container.scrollTop = wasNearBottom ? container.scrollHeight : Math.max(0, container.scrollHeight - distanceFromBottom);
         updateScrollToBottomVisibility();
