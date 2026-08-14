@@ -302,7 +302,7 @@ app.post('/api/auth/signup/start', async (req, res) => {
                 text: `Your HAI verification code is: ${code}\n\nThis code expires in 15 minutes.`
             });
         } else {
-            console.warn('RESEND_API_KEY not set — verification email not sent. Code:', code);
+            console.warn('RESEND_API_KEY not set — verification email not sent.');
         }
 
         res.json({ ok: true });
@@ -487,7 +487,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
                 text: `Someone (hopefully you) requested a password reset for @${user.username}.\n\nYour temporary password is: ${tempPassword}\n\nLog in with it, then you'll be asked to set a new password right away. If you didn't request this, consider changing your password once you're able to log in.`
             });
         } else {
-            console.warn('RESEND_API_KEY not set — password reset email not sent. Temp password:', tempPassword);
+            console.warn('RESEND_API_KEY not set — password reset email not sent.');
         }
 
         res.json(GENERIC_RESPONSE);
