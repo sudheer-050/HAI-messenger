@@ -8180,7 +8180,6 @@
             submitBtn.disabled = true;
             try {
                 const data = await postAuthJSON('/api/auth/login', { identity, password });
-                localStorage.setItem('hai_session_token', data.token);
                 myUsername = data.username;
 
                 // A temporary password from Forgot Password logs in fine, but must be
@@ -8279,7 +8278,7 @@
             // Deliberately do not continue into the app on this same session — log the
             // temporary-password session out and land back on the login screen so the
             // new password is what actually gets used to open the app.
-            localStorage.removeItem('hai_session_token');
+            fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
             const loggedInUsername = myUsername;
             myUsername = "";
             switchAuthMode('login');
@@ -8334,7 +8333,6 @@
 
         try {
             const data = await postAuthJSON('/api/auth/signup/complete', { email: pendingRegistrationData.identity, username: handle });
-            localStorage.setItem('hai_session_token', data.token);
             myUsername = data.username;
             pendingProfileMergeData = {
                 firstName: pendingRegistrationData.firstName,
@@ -8475,7 +8473,7 @@
 
             let hasConnectedBefore = false;
             socket.on('connect', () => {
-                socket.emit('register_user', { username: myUsername, publicKey: myExportedPublicKeyString, token: localStorage.getItem('hai_session_token') });
+                socket.emit('register_user', { username: myUsername, publicKey: myExportedPublicKeyString });
 
                 // Socket.IO fires 'connect' again on every reconnect, not just the first
                 // time -- mobile browsers routinely drop the connection while backgrounded
@@ -9034,10 +9032,12 @@
     }
 
     function closeSecureTunnel() {
+        // Fire-and-forget: clear the httpOnly cookie server-side. The UI transitions
+        // to login immediately regardless of the response.
+        fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
         if (socket) {
             socket.disconnect();
         }
-        localStorage.removeItem('hai_session_token');
         myUsername = ""; myKeyPair = null; myExportedPublicKeyString = ""; conversationHistory = {}; trashHistory = []; currentActiveUser = ""; unreadChats = []; unreadNotifications = {}; recentlyNotifiedUsers = new Set(); pendingReplyId = null;
         document.getElementById('messages').innerHTML = "";
         document.getElementById('identityInput').value = "";
@@ -10761,10 +10761,10 @@
 
     /* ============ SETTINGS ============ */
     async function authFetchJSON(url, method, body) {
-        const token = localStorage.getItem('hai_session_token');
         const response = await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
             body: body ? JSON.stringify(body) : undefined
         });
         const data = await response.json().catch(() => ({}));
@@ -14232,18 +14232,12 @@
         }
     }
 
-    // STAY LOGGED IN ACROSS REFRESHES — the session token was already being kept in
-    // localStorage (so it survives a reload), but nothing ever used it: every reload
-    // landed back on the login form regardless. This checks it against the server
-    // once at startup and, if it's still valid, skips straight into the app instead
-    // of making you log in again. Tokens expire after 7 days server-side (see
-    // signSessionToken in server.js) or immediately on explicit logout (which clears
-    // this key -- see closeSecureTunnel) -- whichever happens first naturally ends
-    // the auto-login here too, since either way the token is gone or /api/auth/me
-    // rejects it.
+    // STAY LOGGED IN ACROSS REFRESHES — on page load, probe /api/auth/me with the
+    // httpOnly session cookie. If it's still valid, skip straight into the app;
+    // otherwise fall through to the login form. Tokens expire after 7 days server-side
+    // (see signSessionToken in server.js) or immediately on explicit logout (which
+    // calls POST /api/auth/logout to clear the cookie -- see closeSecureTunnel).
     async function attemptAutoLogin() {
-        if (!localStorage.getItem('hai_session_token')) return;
-
         const setupEl = document.getElementById('setup');
         setupEl.style.display = 'none'; // hold the login form back while we check
 
@@ -14253,8 +14247,7 @@
             pendingProfileMergeData = { firstName: me.firstName, lastName: me.lastName, email: me.email };
             startChatSession();
         } catch (err) {
-            // Expired, revoked, or otherwise no longer valid -- fall back to a normal login.
-            localStorage.removeItem('hai_session_token');
+            // No valid session cookie — fall back to a normal login.
             setupEl.style.display = 'flex';
             generateLogoWatermark('setupLogoWatermarkLayer'); // was skipped earlier since #setup was hidden then -- generate it now that it's visible
         }
