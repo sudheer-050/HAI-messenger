@@ -7140,6 +7140,18 @@
         reader.readAsDataURL(file);
     }
 
+    /* HTML escaping helper — used wherever user-supplied strings land in innerHTML or
+       attribute values. Escapes &, <, >, ", ' so no value can break out of its context. */
+    function esc(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     /* CLICK HANDLERS FOR PROFILE INTEREST TAPS */
     async function handleSongClick(songQuery) {
         if (!songQuery || songQuery === 'N/A' || songQuery === 'None listed') return;
