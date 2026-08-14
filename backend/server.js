@@ -10,9 +10,11 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 app.use(express.json({ limit: '25mb' })); // encrypted email backups can be several MB base64-encoded
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), {
     // index.html is a single always-changing file during active development -- a
     // browser silently serving a stale cached copy after an edit (instead of a normal
@@ -217,11 +219,23 @@ async function areFriends(a, b) {
     return result.rows.length > 0;
 }
 
-// Verifies the Bearer token on REST calls that need a real logged-in user
-// (as opposed to the public signup/login endpoints themselves).
+// Cookie options used when issuing and clearing the session cookie.
+// Secure is conditional so local plain-HTTP dev still works; production always
+// runs behind Cloudflare HTTPS so NODE_ENV=production enforces it there.
+const COOKIE_OPTS = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV !== 'development',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000  // 7 days
+};
+
+// Cookie-first auth; falls back to Authorization: Bearer during the transition
+// period while the frontend is updated to drop localStorage.
 function requireAuth(req, res, next) {
+    const cookieToken = req.cookies.token;
     const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const token = cookieToken || bearerToken;
     if (!token) return res.status(401).json({ error: 'Not authenticated.' });
     try {
         req.username = jwt.verify(token, JWT_SECRET).username;
@@ -387,6 +401,7 @@ app.post('/api/auth/signup/complete', async (req, res) => {
 
         const token = signSessionToken(normalizedUsername);
         logAnalyticsEvent('signup', normalizedUsername);
+        res.cookie('token', token, COOKIE_OPTS);
         res.json({ ok: true, token, username: normalizedUsername });
     } catch (err) {
         console.error('signup/complete failed:', err.message);
@@ -424,6 +439,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         const token = signSessionToken(user.username);
         logAnalyticsEvent('login', user.username);
+        res.cookie('token', token, COOKIE_OPTS);
         res.json({ ok: true, token, username: user.username, mustChangePassword: !!user.must_change_password });
     } catch (err) {
         console.error('login failed:', err.message);
@@ -545,6 +561,11 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
     }
 });
 
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie('token', { httpOnly: true, secure: COOKIE_OPTS.secure, sameSite: 'strict' });
+    res.json({ ok: true });
+});
+
 app.post('/api/auth/delete-account', requireAuth, async (req, res) => {
     const { password } = req.body || {};
     if (!password) return res.status(400).json({ error: 'Password is required to delete your account.' });
@@ -562,6 +583,7 @@ app.post('/api/auth/delete-account', requireAuth, async (req, res) => {
         if (keys.length) await redisClient.del(keys);
         await redisClient.sRem('online_users', req.username);
 
+        res.clearCookie('token', { httpOnly: true, secure: COOKIE_OPTS.secure, sameSite: 'strict' });
         res.json({ ok: true });
     } catch (err) {
         console.error('delete-account failed:', err.message);
@@ -1616,10 +1638,16 @@ io.on('connection', (socket) => {
     // Map user to socket ID and store their public key string inside Redis.
     // The token is the only source of truth for identity here — a client claiming
     // any other username without a matching valid JWT is rejected outright.
+    // Auth order: httpOnly cookie from the handshake HTTP request first (set by
+    // login/signup), then data.token as a fallback during the frontend transition.
     socket.on('register_user', async (data) => {
         let decoded;
         try {
-            decoded = jwt.verify((data || {}).token, JWT_SECRET);
+            const cookieHeader = socket.handshake.headers.cookie || '';
+            const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]+)/);
+            const cookieToken = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+            const token = cookieToken || (data || {}).token;
+            decoded = jwt.verify(token, JWT_SECRET);
         } catch (err) {
             socket.emit('auth_error', { error: 'Session expired or invalid. Please log in again.' });
             socket.disconnect(true);
