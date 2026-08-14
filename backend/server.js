@@ -1856,7 +1856,7 @@ io.on('connection', (socket) => {
                 id: data.id,
                 sender: socket.username,
                 encryptedMessage,
-                replyToText: data.replyToText || null,
+                replyToText: (data.replyRecipients && data.replyRecipients[targetUsername]) || null,
                 replyToId: data.replyToId || null
             };
             const targetSocketId = await redisClient.get(`user:${targetUsername}:socket`);

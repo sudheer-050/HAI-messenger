@@ -25,8 +25,8 @@
             --bg-main: #f0f2f5;
             --bg-sidebar: #ffffff;
             --bg-chat: #f7f8fa;
-            --accent-blue: #4a9ad9;
-            --accent-blue-hover: #3b7bae;
+            --accent-brand: #6C5DD3;
+            --accent-brand-hover: #5847B8;
             --accent-green: #23a55a;
             --accent-red: #da373c;
             --accent-gold: #e0b400;
@@ -7024,11 +7024,15 @@
             if (targetPubKeyBase64) {
                 try {
                     encryptedBundle = await encryptPayloadForUser(targetPubKeyBase64, jsonStr);
+                    let encReplyToText = null;
+                    if (replyTextPayload) {
+                        encReplyToText = await encryptPayloadForUser(targetPubKeyBase64, replyTextPayload);
+                    }
                     socket.emit('send_private_message', {
                         id: messageId,
                         targetUsername: currentActiveUser,
                         encryptedMessage: encryptedBundle,
-                        replyToText: replyTextPayload,
+                        replyToText: encReplyToText,
                         replyToId: replyIdPayload
                     });
                 } catch (err) {
@@ -7334,8 +7338,8 @@
             <div class="profile-body">
                 <div class="profile-header-info">
                     <div>
-                        <h3 class="profile-name">${user.firstName} ${user.lastName}</h3>
-                        <div class="profile-handle">@${username} • ${user.identity}</div>
+                        <h3 class="profile-name">${esc(user.firstName)} ${esc(user.lastName)}</h3>
+                        <div class="profile-handle">@${username} • ${esc(user.identity)}</div>
                     </div>
                     ${isMe
                         ? `<button type="button" class="edit-profile-btn" onclick="renderProfileEditForm('${username}')">Edit Profile</button>`
@@ -7359,7 +7363,7 @@
                 ${(isMe || user.about) ? `
                 <div>
                     <div class="profile-section-title">About</div>
-                    <div class="profile-about-text">${user.about || "No bio added yet."}</div>
+                    <div class="profile-about-text">${user.about ? esc(user.about) : "No bio added yet."}</div>
                 </div>` : ''}
 
                 ${buildProfileIntroHtml(user, isMe, username)}
@@ -7367,25 +7371,25 @@
                 <div>
                     <div class="profile-section-title">Favorites & Interests <span style="font-weight: 400; font-size: 10px; color: var(--text-muted);">(Tap to action)</span></div>
                     <div class="interests-grid">
-                        <div class="interest-card clickable" onclick="handleSongClick('${user.songs || ''}')">
+                        <div class="interest-card clickable" data-interest-handler="song" data-interest-value="${esc(user.songs || '')}">
                             <div class="interest-label">🎵 Songs</div>
-                            <div class="interest-value">${user.songs || 'N/A'}</div>
+                            <div class="interest-value">${esc(user.songs) || 'N/A'}</div>
                         </div>
-                        <div class="interest-card clickable" onclick="handleMovieClick('${user.movies || ''}')">
+                        <div class="interest-card clickable" data-interest-handler="movie" data-interest-value="${esc(user.movies || '')}">
                             <div class="interest-label">🎬 Movies</div>
-                            <div class="interest-value">${user.movies || 'N/A'}</div>
+                            <div class="interest-value">${esc(user.movies) || 'N/A'}</div>
                         </div>
-                        <div class="interest-card clickable" onclick="handleGameClick('${user.games || ''}')">
+                        <div class="interest-card clickable" data-interest-handler="game" data-interest-value="${esc(user.games || '')}">
                             <div class="interest-label">🎮 Games</div>
-                            <div class="interest-value">${user.games || 'N/A'}</div>
+                            <div class="interest-value">${esc(user.games) || 'N/A'}</div>
                         </div>
-                        <div class="interest-card clickable" onclick="handlePlaceClick('${user.places || ''}')">
+                        <div class="interest-card clickable" data-interest-handler="place" data-interest-value="${esc(user.places || '')}">
                             <div class="interest-label">📍 Places</div>
-                            <div class="interest-value">${user.places || 'N/A'}</div>
+                            <div class="interest-value">${esc(user.places) || 'N/A'}</div>
                         </div>
-                        <div class="interest-card clickable" style="grid-column: span 2;" onclick="handlePersonClick('${user.people || ''}')">
+                        <div class="interest-card clickable" style="grid-column: span 2;" data-interest-handler="person" data-interest-value="${esc(user.people || '')}">
                             <div class="interest-label">👥 Favorite People</div>
-                            <div class="interest-value">${user.people || 'N/A'}</div>
+                            <div class="interest-value">${esc(user.people) || 'N/A'}</div>
                         </div>
                     </div>
                 </div>
@@ -7406,6 +7410,13 @@
                     ` : '')}
             </div>
         `;
+        // Wire interest-card clicks via addEventListener so raw values pass through
+        // without needing string-escaping in an inline onclick attribute.
+        const interestHandlers = { song: handleSongClick, movie: handleMovieClick, game: handleGameClick, place: handlePlaceClick, person: handlePersonClick };
+        card.querySelectorAll('[data-interest-handler]').forEach(el => {
+            const fn = interestHandlers[el.dataset.interestHandler];
+            if (fn) el.addEventListener('click', () => fn(el.dataset.interestValue));
+        });
         // Reset AFTER the new content is in, not before -- #profileCardContent is a
         // static node reused across every open, and resetting scrollTop before
         // swapping innerHTML lets the browser's automatic scroll anchoring (which
@@ -7451,8 +7462,8 @@
             <div class="profile-body">
                 <div class="profile-header-info">
                     <div>
-                        <h3 class="profile-name">${user.firstName} ${user.lastName}</h3>
-                        <div class="profile-handle">@${username} • ${user.identity}</div>
+                        <h3 class="profile-name">${esc(user.firstName)} ${esc(user.lastName)}</h3>
+                        <div class="profile-handle">@${username} • ${esc(user.identity)}</div>
                     </div>
                     ${conversationHistory[username] ? `<button type="button" class="btn-clear-chat" onclick="clearActiveChatMessages('${username}')">${icon('trash')} Clear Chat</button>` : ''}
                 </div>
@@ -7661,7 +7672,7 @@
             <div>
                 <div class="profile-section-title">Intro</div>
                 ${visibleRows.length ? visibleRows.map(r => (r.value && r.value.trim())
-                    ? `<div class="profile-intro-row">${icon(r.iconName)}<span>${r.prefix}<b>${r.value}</b></span></div>`
+                    ? `<div class="profile-intro-row">${icon(r.iconName)}<span>${esc(r.prefix)}<b>${esc(r.value)}</b></span></div>`
                     : `<div class="profile-intro-row" style="cursor:pointer; color: var(--accent-blue);" onclick="renderProfileEditForm('${username}')">${icon(r.iconName)}<span>Add ${r.label}</span></div>`
                 ).join('') : `<p class="settings-row-desc">@${username} hasn't shared any Intro info.</p>`}
             </div>
@@ -8532,7 +8543,11 @@
                 if (!isChatMuted(data.sender)) playNotificationSound();
                 try {
                     const plainText = await decryptPayloadWithPrivateKey(myKeyPair.privateKey, data.encryptedMessage);
-                    saveAndRenderIncomingMessage(data.id, data.sender, plainText, data.encryptedMessage, data.replyToText || null, data.replyToId || null, !!data.forwarded, !!data.broadcast);
+                    let replyText = null;
+                    if (data.replyToText) {
+                        try { replyText = await decryptPayloadWithPrivateKey(myKeyPair.privateKey, data.replyToText); } catch(e) {}
+                    }
+                    saveAndRenderIncomingMessage(data.id, data.sender, plainText, data.encryptedMessage, replyText, data.replyToId || null, !!data.forwarded, !!data.broadcast);
                 } catch (err) {
                     saveAndRenderIncomingMessage(data.id, data.sender, "[🚨 Private Key Mismatch: Cipher Unreadable]", data.encryptedMessage, null, null);
                 }
@@ -8804,7 +8819,11 @@
                 if (!isChatMuted(groupKey(data.groupId))) playNotificationSound();
                 try {
                     const plainText = await decryptPayloadWithPrivateKey(myKeyPair.privateKey, data.encryptedMessage);
-                    saveAndRenderIncomingGroupMessage(data.groupId, data.id, data.sender, plainText, data.replyToText || null, data.replyToId || null);
+                    let replyText = null;
+                    if (data.replyToText) {
+                        try { replyText = await decryptPayloadWithPrivateKey(myKeyPair.privateKey, data.replyToText); } catch(e) {}
+                    }
+                    saveAndRenderIncomingGroupMessage(data.groupId, data.id, data.sender, plainText, replyText, data.replyToId || null);
                 } catch (err) {
                     saveAndRenderIncomingGroupMessage(data.groupId, data.id, data.sender, "[🚨 Private Key Mismatch: Cipher Unreadable]", null, null);
                 }
@@ -10312,7 +10331,8 @@
 
         const messageId = 'msg-' + Math.random().toString(36).substr(2, 9);
         const recipients = await encryptForGroupMembers(groupId, text);
-        socket.emit('send_group_message', { groupId, id: messageId, recipients, replyToText: replyTextPayload, replyToId: replyIdPayload });
+        const replyRecipients = replyTextPayload ? await encryptForGroupMembers(groupId, replyTextPayload) : null;
+        socket.emit('send_group_message', { groupId, id: messageId, recipients, replyRecipients, replyToId: replyIdPayload });
 
         const now = Date.now();
         const newMsg = { id: messageId, sender: 'You', text, timestamp: now, replyToText: replyTextPayload, replyToId: replyIdPayload, status: 'sent', readBy: [] };
@@ -14124,11 +14144,15 @@
             let encryptedBundle = "";
             try {
                 encryptedBundle = await encryptPayloadForUser(targetPubKeyBase64, text);
+                let encReplyToText = null;
+                if (replyTextPayload) {
+                    encReplyToText = await encryptPayloadForUser(targetPubKeyBase64, replyTextPayload);
+                }
                 socket.emit('send_private_message', {
                     id: messageId,
                     targetUsername: currentActiveUser,
                     encryptedMessage: encryptedBundle,
-                    replyToText: replyTextPayload,
+                    replyToText: encReplyToText,
                     replyToId: replyIdPayload
                 });
             } catch(err) {
