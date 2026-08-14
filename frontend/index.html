@@ -2339,7 +2339,7 @@
         .profile-cover {
             height: 140px;
             flex-shrink: 0; /* prevent cover from compressing when card has a fixed height */
-            background: linear-gradient(135deg, var(--accent-brand) 0%, #dbe6fb 100%);
+            background: var(--accent-brand);
             background-size: cover;
             background-position: center top;
             position: relative;
@@ -3185,7 +3185,7 @@
         .chat-area.settings-aux-mode #settingsAuxView,
         .chat-area.friends-aux-mode #friendsAuxView,
         .chat-area.groupinfo-aux-mode #groupInfoAuxView {
-            background: linear-gradient(160deg, rgba(108, 93, 211, 0.18), rgba(224, 180, 0, 0.1) 55%, rgba(35, 165, 90, 0.12));
+            background: var(--bg-chat);
         }
         .chat-area-aux-view .profile-card,
         .chat-area-aux-view .trash-card {
@@ -3206,11 +3206,9 @@
             border-color: rgba(255, 255, 255, 0.1);
         }
 
-        /* STATUS PANEL — the in-panel list/feed (see #statusAuxView) gets the same
-           Liquid-Glass treatment, just with its own tint/opacity since it was built
-           first and already tuned. */
+        /* STATUS PANEL — flat backdrop, same as the other aux panels. */
         .chat-area.status-aux-mode #statusAuxView {
-            background: linear-gradient(160deg, rgba(108, 93, 211, 0.22), rgba(224, 180, 0, 0.14) 55%, rgba(108, 93, 211, 0.1));
+            background: var(--bg-chat);
         }
         .chat-area-aux-view .statuses-card {
             background: rgba(255, 255, 255, 0.45);
