@@ -854,12 +854,6 @@
             box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
             background-color: var(--bg-chat);
         }
-        @keyframes chatBubbleGradientDrift {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-
         .chat-area.no-active-chat {
             display: flex;
             justify-content: center;
@@ -2987,9 +2981,8 @@
         }
         .blocked-user-item span { font-size: 13px; color: var(--text-normal); font-weight: 600; }
 
-        /* Mobile-Settings-style picker rows (Theme, Font Size, Sound Choice, Chat
-           Wallpaper) — a plain list with a checkmark on the selected row, instead of
-           a row of button "boxes". */
+        /* Mobile-Settings-style picker rows (Theme, Font Size, Sound Choice) — a plain list
+           with a checkmark on the selected row, instead of a row of button "boxes". */
         .settings-choice-list { display: flex; flex-direction: column; }
         .settings-choice-row {
             display: flex;
@@ -3011,7 +3004,6 @@
         .settings-choice-row .icon { width: 16px; height: 16px; color: var(--text-muted); flex-shrink: 0; }
         .settings-choice-label { flex: 1; font-weight: 600; }
         .settings-choice-swatch { width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0; border: 1px solid var(--border-color); }
-        .settings-choice-swatch.wallpaper-gradient-swatch { background-size: 300% 300%; animation: chatBubbleGradientDrift 9s ease infinite; }
         .settings-choice-check { display: none; flex-shrink: 0; }
         .settings-choice-check .icon { width: 16px; height: 16px; color: var(--accent-brand); }
         .settings-choice-row.active .settings-choice-check { display: inline-flex; }
@@ -3863,10 +3855,6 @@
                             <button type="button" class="settings-choice-row" id="themeBtn-light" onclick="setAppTheme('light')"><span data-icon="sun"></span><span class="settings-choice-label">Light</span><span class="settings-choice-check" data-icon="checkSingle"></span></button>
                             <button type="button" class="settings-choice-row" id="themeBtn-dark" onclick="setAppTheme('dark')"><span data-icon="moon"></span><span class="settings-choice-label">Dark</span><span class="settings-choice-check" data-icon="checkSingle"></span></button>
                         </div>
-
-                        <div class="settings-section-title">Chat Wallpaper</div>
-                        <div class="settings-choice-list" id="wallpaperSwatchRow"></div>
-                        <input type="file" id="wallpaperUploadInput" accept="image/*" style="display: none;" onchange="handleWallpaperUpload(event)">
 
                         <div class="settings-section-title">Font Size</div>
                         <div class="settings-choice-list">
@@ -8410,7 +8398,6 @@
             applyLoggedInProfile(myUsername, pendingProfileMergeData);
             pendingProfileMergeData = null;
             checkAutoBackup();
-            applyStoredWallpaper();
             applyStoredFontSize();
             await loadSavedConversations();
             purgeExpiredDisappearingMessages();
@@ -11016,7 +11003,6 @@
         document.getElementById('settingsAutoDownloadMediaToggle').checked = getBoolSetting('auto_download_media', true);
         renderNotifTonePicker();
         renderBlockedList();
-        renderWallpaperSwatches();
         updateStorageUsageDisplay();
         renderStorageBreakdown();
         renderFontSizeButtons();
@@ -11159,89 +11145,6 @@
         if (darkBtn) darkBtn.classList.toggle('active', mode === 'dark');
     }
 
-    /* CHAT WALLPAPER — a solid color (applied via the --bg-chat CSS var, same as
-       every other themed surface), a moving gradient (same technique as the chat
-       bubble/sidebar/login backgrounds -- see chatBubbleGradientDrift, applied
-       directly to #messages as an animated background-image), or a custom uploaded
-       picture (also applied directly to #messages as a background-image). */
-    const WALLPAPER_SWATCHES = ['#f7f8fa', '#e8f5f0', '#fdf3e7', '#f0e9fb', '#e7f1fb', '#1a1a1a'];
-    const WALLPAPER_SWATCH_LABELS = { '#f7f8fa': 'Default', '#e8f5f0': 'Mint', '#fdf3e7': 'Cream', '#f0e9fb': 'Lavender', '#e7f1fb': 'Sky', '#1a1a1a': 'Dark' };
-    // Gradient wallpapers are stored as "gradient:<key>" so applyStoredWallpaper can
-    // tell them apart from a plain hex swatch or a data:image upload.
-    const WALLPAPER_GRADIENTS = {
-        aurora: 'linear-gradient(120deg, rgba(74,154,217,0.55), rgba(35,165,90,0.5), rgba(160,90,220,0.5), rgba(74,154,217,0.55))',
-        sunset: 'linear-gradient(120deg, rgba(224,180,0,0.55), rgba(218,90,60,0.5), rgba(200,70,130,0.5), rgba(224,180,0,0.55))',
-        ocean:  'linear-gradient(120deg, rgba(35,140,180,0.55), rgba(35,165,150,0.5), rgba(74,154,217,0.5), rgba(35,140,180,0.55))',
-        meadow: 'linear-gradient(120deg, rgba(74,154,217,0.5), rgba(224,180,0,0.4), rgba(35,165,90,0.45), rgba(74,154,217,0.5))',
-        berry:  'linear-gradient(120deg, rgba(218,55,120,0.5), rgba(120,70,220,0.5), rgba(74,154,217,0.5), rgba(218,55,120,0.5))'
-    };
-    const WALLPAPER_GRADIENT_LABELS = { aurora: 'Aurora', sunset: 'Sunset', ocean: 'Ocean', meadow: 'Meadow', berry: 'Berry' };
-    function getStoredWallpaper() { return getMySettings().wallpaper || WALLPAPER_SWATCHES[0]; }
-    function applyStoredWallpaper() {
-        const value = getStoredWallpaper();
-        const messagesEl = document.getElementById('messages');
-        if (!messagesEl) return;
-        if (typeof value === 'string' && value.startsWith('data:image')) {
-            messagesEl.style.backgroundImage = `url('${value}')`;
-            messagesEl.style.backgroundSize = 'cover';
-            messagesEl.style.backgroundPosition = 'center';
-            messagesEl.style.animation = 'none';
-        } else if (typeof value === 'string' && value.startsWith('gradient:')) {
-            const gradient = WALLPAPER_GRADIENTS[value.slice('gradient:'.length)] || WALLPAPER_GRADIENTS.aurora;
-            messagesEl.style.backgroundImage = gradient;
-            messagesEl.style.backgroundSize = '300% 300%';
-            messagesEl.style.backgroundPosition = '';
-            messagesEl.style.animation = 'chatBubbleGradientDrift 24s ease infinite';
-        } else {
-            document.documentElement.style.setProperty('--bg-chat', value);
-            messagesEl.style.backgroundImage = 'none';
-            messagesEl.style.animation = 'none';
-        }
-    }
-    function selectWallpaper(value) {
-        getMySettings().wallpaper = value;
-        persistProfileStore();
-        applyStoredWallpaper();
-        renderWallpaperSwatches();
-    }
-    function handleWallpaperUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        if (file.size > 3 * 1024 * 1024) { showToast('❌ Image must be under 3MB.', 'error'); return; }
-        const reader = new FileReader();
-        reader.onload = (e) => selectWallpaper(e.target.result);
-        reader.readAsDataURL(file);
-    }
-    function renderWallpaperSwatches() {
-        const row = document.getElementById('wallpaperSwatchRow');
-        if (!row) return;
-        const current = getStoredWallpaper();
-        const isCustomImage = typeof current === 'string' && current.startsWith('data:image');
-        let html = WALLPAPER_SWATCHES.map(color => `
-            <button type="button" class="settings-choice-row ${!isCustomImage && color === current ? 'active' : ''}" onclick="selectWallpaper('${color}')">
-                <span class="settings-choice-swatch" style="background:${color};"></span>
-                <span class="settings-choice-label">${WALLPAPER_SWATCH_LABELS[color] || color}</span>
-                <span class="settings-choice-check" data-icon="checkSingle"></span>
-            </button>`
-        ).join('');
-        html += Object.keys(WALLPAPER_GRADIENTS).map(key => {
-            const value = 'gradient:' + key;
-            return `
-            <button type="button" class="settings-choice-row ${current === value ? 'active' : ''}" onclick="selectWallpaper('${value}')">
-                <span class="settings-choice-swatch wallpaper-gradient-swatch" style="background-image:${WALLPAPER_GRADIENTS[key]};"></span>
-                <span class="settings-choice-label">${WALLPAPER_GRADIENT_LABELS[key]}</span>
-                <span class="settings-choice-check" data-icon="checkSingle"></span>
-            </button>`;
-        }).join('');
-        html += `
-            <button type="button" class="settings-choice-row ${isCustomImage ? 'active' : ''}" onclick="document.getElementById('wallpaperUploadInput').click()">
-                <span class="settings-choice-swatch" style="${isCustomImage ? `background-image:url('${current}');background-size:cover;` : 'background:var(--input-bg);'}"></span>
-                <span class="settings-choice-label">Upload Picture</span>
-                <span class="settings-choice-check" data-icon="checkSingle"></span>
-            </button>`;
-        row.innerHTML = html;
-        row.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
-    }
 
     /* STORAGE & CLEAR ALL */
     async function updateStorageUsageDisplay() {
@@ -12000,7 +11903,6 @@
         { label: 'Disappearing Messages', tab: 'privacy', keywords: 'disappearing messages timer auto delete privacy' },
         { label: 'Notification Sound', tab: 'notifications', keywords: 'sound tone notification alert' },
         { label: 'Enter Is Send', tab: 'chats', keywords: 'enter key send message keyboard' },
-        { label: 'Wallpaper', tab: 'chats', keywords: 'wallpaper background chat theme' },
         { label: 'Theme', tab: 'chats', keywords: 'dark light theme appearance mode' },
         { label: 'Font Size', tab: 'chats', keywords: 'font size text size chats' },
         { label: 'Storage Used', tab: 'storage', keywords: 'storage data usage space' },
