@@ -2381,6 +2381,7 @@
 
         .profile-cover {
             height: 140px;
+            flex-shrink: 0; /* prevent cover from compressing when card has a fixed height */
             background: linear-gradient(135deg, var(--accent-brand) 0%, #dbe6fb 100%);
             background-size: cover;
             background-position: center top;
@@ -2504,6 +2505,7 @@
             display: flex;
             flex-direction: column;
             gap: 16px;
+            flex-shrink: 0; /* don't compress — card scrolls to show full content */
         }
 
         .profile-header-info {
