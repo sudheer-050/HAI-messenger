@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HAI Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Color+Emoji&display=swap" rel="stylesheet">
 <script>
     // Applied before first paint so there's no light-mode flash for a dark-mode admin.
     document.documentElement.setAttribute('data-theme', localStorage.getItem('hai_theme') || 'light');
@@ -36,7 +39,7 @@
     * { box-sizing: border-box; }
     body {
         margin: 0; background: var(--bg-main); color: var(--text-normal);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif, 'Noto Color Emoji';
         display: flex; flex-direction: column; height: 100vh; overflow: hidden;
     }
     button, input, select { font-family: inherit; }
@@ -140,6 +143,14 @@
     .gate-screen { display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 12px; text-align: center; padding: 20px; }
     .gate-screen h2 { margin: 0; }
     .gate-screen p { color: var(--text-muted); max-width: 360px; margin: 0; }
+
+    /* THEMED CONFIRM / PROMPT / TOAST — replaces native alert/confirm/prompt */
+    .hai-dialog-card { background: var(--bg-card); border-radius: 14px; padding: 20px 24px; width: 320px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.28); }
+    .hai-dialog-card p { margin: 0 0 16px; font-size: 13px; color: var(--text-normal); white-space: pre-line; text-align: center; line-height: 1.5; }
+    .hai-dialog-btns { display: flex; gap: 8px; justify-content: center; }
+    .hai-toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .hai-toast { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; box-shadow: var(--shadow); pointer-events: all; cursor: pointer; white-space: nowrap; max-width: 340px; }
+    .hai-toast.error { border-color: var(--accent-red); color: var(--accent-red); }
 </style>
 </head>
 <body>
@@ -244,6 +255,33 @@
         </div>
     </div>
 </div>
+
+<!-- THEMED CONFIRM DIALOG -->
+<div class="modal-overlay" id="haiConfirmOverlay">
+    <div class="hai-dialog-card">
+        <p id="haiConfirmMsg"></p>
+        <div class="hai-dialog-btns">
+            <button type="button" class="btn danger" id="haiConfirmOk">OK</button>
+            <button type="button" class="btn" id="haiConfirmCancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- THEMED PROMPT DIALOG -->
+<div class="modal-overlay" id="haiPromptOverlay">
+    <div class="hai-dialog-card">
+        <p id="haiPromptMsg"></p>
+        <div class="form-group" style="margin-bottom:12px;">
+            <input type="text" id="haiPromptInput" autocomplete="off">
+        </div>
+        <div class="hai-dialog-btns">
+            <button type="button" class="btn primary" id="haiPromptOk">OK</button>
+            <button type="button" class="btn" id="haiPromptCancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div id="haiToastContainer" class="hai-toast-container"></div>
 
 <script>
     const token = localStorage.getItem('hai_session_token');
@@ -371,7 +409,7 @@
     }
 
     async function createDashboard() {
-        const name = prompt('Dashboard name', 'New Dashboard');
+        const name = await showPrompt('Dashboard name', 'New Dashboard');
         if (!name || !name.trim()) return;
         const created = await authFetchJSON('/api/admin/dashboards', 'POST', { name: name.trim(), layout: [] });
         dashboards.push({ id: created.id, name: name.trim(), layout: [] });
@@ -382,7 +420,7 @@
 
     async function renameDashboard(id) {
         const d = dashboards.find(x => x.id === id);
-        const name = prompt('Dashboard name', d.name);
+        const name = await showPrompt('Dashboard name', d.name);
         if (!name || !name.trim() || name.trim() === d.name) return;
         d.name = name.trim();
         await authFetchJSON(`/api/admin/dashboards/${id}`, 'PATCH', { name: d.name });
@@ -391,8 +429,8 @@
     }
 
     async function deleteDashboard(id) {
-        if (dashboards.length <= 1) return alert('You need at least one dashboard.');
-        if (!confirm('Delete this dashboard? This cannot be undone.')) return;
+        if (dashboards.length <= 1) { showToast('You need at least one dashboard.'); return; }
+        if (!await showConfirm('Delete this dashboard? This cannot be undone.')) return;
         await authFetchJSON(`/api/admin/dashboards/${id}`, 'DELETE');
         dashboards = dashboards.filter(d => d.id !== id);
         if (activeDashboardId === id) activeDashboardId = dashboards[0].id;
@@ -597,7 +635,7 @@
         await persistActiveDashboardLayout();
     }
     async function deleteWidget(widgetId) {
-        if (!confirm('Remove this widget?')) return;
+        if (!await showConfirm('Remove this widget?')) return;
         const d = currentDashboard();
         d.layout = d.layout.filter(w => w.id !== widgetId);
         renderActiveDashboard();
@@ -622,7 +660,7 @@
             a.remove();
             URL.revokeObjectURL(url);
         } catch (err) {
-            alert('Could not export CSV: ' + err.message);
+            showToast('Could not export CSV: ' + err.message, 'error');
         }
     }
 
@@ -658,19 +696,57 @@
     async function submitAddReport() {
         const email = document.getElementById('reportEmailInput').value.trim();
         const frequency = document.getElementById('reportFrequencySelect').value;
-        if (!email) return alert('Enter an email address.');
+        if (!email) { showToast('Enter an email address.'); return; }
         const d = currentDashboard();
         try {
             await authFetchJSON('/api/admin/reports', 'POST', { dashboardId: d.id, email, frequency });
             document.getElementById('reportEmailInput').value = '';
             await renderReportsList();
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, 'error');
         }
     }
     async function deleteReport(id) {
         await authFetchJSON(`/api/admin/reports/${id}`, 'DELETE');
         await renderReportsList();
+    }
+
+    /* THEMED TOAST / CONFIRM / PROMPT — replaces native alert/confirm/prompt */
+    function showToast(msg, type) {
+        const c = document.getElementById('haiToastContainer');
+        const t = document.createElement('div');
+        t.className = 'hai-toast' + (type ? ' ' + type : '');
+        t.textContent = msg;
+        c.appendChild(t);
+        const remove = () => { t.style.transition = 'opacity 0.3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); };
+        const timer = setTimeout(remove, 3500);
+        t.addEventListener('click', () => { clearTimeout(timer); remove(); });
+    }
+    function showConfirm(msg) {
+        return new Promise(resolve => {
+            document.getElementById('haiConfirmMsg').textContent = msg;
+            const ov = document.getElementById('haiConfirmOverlay');
+            ov.classList.add('open');
+            const done = r => { ov.classList.remove('open'); resolve(r); };
+            document.getElementById('haiConfirmOk').onclick    = () => done(true);
+            document.getElementById('haiConfirmCancel').onclick = () => done(false);
+            ov.onclick = e => { if (e.target === ov) done(false); };
+        });
+    }
+    function showPrompt(msg, defaultValue) {
+        return new Promise(resolve => {
+            document.getElementById('haiPromptMsg').textContent = msg;
+            const inp = document.getElementById('haiPromptInput');
+            inp.value = defaultValue || '';
+            const ov = document.getElementById('haiPromptOverlay');
+            ov.classList.add('open');
+            setTimeout(() => inp.focus(), 50);
+            const done = r => { ov.classList.remove('open'); resolve(r); };
+            document.getElementById('haiPromptOk').onclick     = () => done(inp.value);
+            document.getElementById('haiPromptCancel').onclick  = () => done(null);
+            ov.onclick = e => { if (e.target === ov) done(null); };
+            inp.onkeydown = e => { if (e.key === 'Enter') done(inp.value); if (e.key === 'Escape') done(null); };
+        });
     }
 
     init();
