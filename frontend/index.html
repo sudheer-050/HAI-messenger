@@ -59,6 +59,7 @@
             --bg-main: #EEECF7;
             --bg-sidebar: #FBFAFE;
             --bg-chat: #F5F2FA;
+            --menu-surface: rgba(251, 250, 254, 0.97);
             --accent-brand: #6C5DD3;
             --accent-brand-hover: #5847B8;
             --accent-green: #23a55a;
@@ -89,6 +90,7 @@
             --bg-main: #17151E;
             --bg-sidebar: #201C29;
             --bg-chat: #15121C;
+            --menu-surface: rgba(32, 28, 41, 0.97);
             --border-color: #2c2f36;
             --text-normal: #e8eaed;
             --text-muted: #9098a3;
@@ -973,6 +975,19 @@
             cursor: pointer;
         }
         .header-menu-dropdown button:hover { background: rgba(0, 0, 0, 0.06); }
+
+        /* .chat-header has backdrop-filter, which creates an isolated compositing layer.
+           A nested backdrop-filter inside that layer can only sample the header's own
+           composited output — not the #messages content visually behind the dropdown.
+           Result: the 55%/60% glass-strong opacity is not enough to obscure chat bubbles.
+           Fix: give the dropdown a near-opaque solid surface in this context only.
+           The hamburger dropdown (in .chat-list-header, which has no backdrop-filter)
+           keeps the glass treatment — its backdrop-filter can sample correctly. */
+        .chat-header .header-menu-dropdown {
+            background: var(--menu-surface);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
 
         .hamburger-menu-wrap { position: relative; }
         .hamburger-dropdown { top: 40px; left: 0; right: auto; min-width: 170px; }
