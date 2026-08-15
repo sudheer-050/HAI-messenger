@@ -7074,12 +7074,16 @@
                     if (replyTextPayload) {
                         encReplyToText = await encryptPayloadForUser(targetPubKeyBase64, replyTextPayload);
                     }
+                    // attachmentType is unencrypted metadata so the server can log media analytics
+                    // without seeing content. Omitted for text messages and non-file types like location.
+                    const attachmentTypeMap = { image: 'image', audio: 'audio', document: 'document' };
                     socket.emit('send_private_message', {
                         id: messageId,
                         targetUsername: currentActiveUser,
                         encryptedMessage: encryptedBundle,
                         replyToText: encReplyToText,
-                        replyToId: replyIdPayload
+                        replyToId: replyIdPayload,
+                        attachmentType: attachmentTypeMap[mediaPayload.fileType] || undefined,
                     });
                 } catch (err) {
                     showToast("Failed to encrypt attachment: " + err.message, 'error'); return;
