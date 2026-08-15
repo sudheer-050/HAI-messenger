@@ -8463,14 +8463,27 @@
             }
 
             if (storedPubKey && storedPrivKey) {
+                // Safari/WebKit throws OperationError if the JWK's alg or key_ops
+                // field doesn't exactly match the importKey algorithm params/usages,
+                // even when Chrome silently accepts the mismatch. Both fields are
+                // optional per RFC 7517 — the importKey call is the authoritative
+                // source for algorithm constraints — so strip them before import.
+                const pubJwk = JSON.parse(storedPubKey);
+                const privJwk = JSON.parse(storedPrivKey);
+                delete pubJwk.alg; delete pubJwk.key_ops;
+                delete privJwk.alg; delete privJwk.key_ops;
                 myKeyPair = {
-                    publicKey: await window.crypto.subtle.importKey("jwk", JSON.parse(storedPubKey), { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]),
-                    privateKey: await window.crypto.subtle.importKey("jwk", JSON.parse(storedPrivKey), { name: "RSA-OAEP", hash: "SHA-256" }, true, ["decrypt"])
+                    publicKey: await window.crypto.subtle.importKey("jwk", pubJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]),
+                    privateKey: await window.crypto.subtle.importKey("jwk", privJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["decrypt"])
                 };
             } else {
                 myKeyPair = await window.crypto.subtle.generateKey({ name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["encrypt", "decrypt"]);
-                localStorage.setItem(`hai_pub_${myUsername}`, JSON.stringify(await window.crypto.subtle.exportKey("jwk", myKeyPair.publicKey)));
-                localStorage.setItem(`hai_priv_${myUsername}`, JSON.stringify(await window.crypto.subtle.exportKey("jwk", myKeyPair.privateKey)));
+                const newPubJwk = await window.crypto.subtle.exportKey("jwk", myKeyPair.publicKey);
+                const newPrivJwk = await window.crypto.subtle.exportKey("jwk", myKeyPair.privateKey);
+                delete newPubJwk.alg; delete newPubJwk.key_ops;
+                delete newPrivJwk.alg; delete newPrivJwk.key_ops;
+                localStorage.setItem(`hai_pub_${myUsername}`, JSON.stringify(newPubJwk));
+                localStorage.setItem(`hai_priv_${myUsername}`, JSON.stringify(newPrivJwk));
             }
 
             myExportedPublicKeyString = arrayBufferToBase64(await window.crypto.subtle.exportKey("spki", myKeyPair.publicKey));
