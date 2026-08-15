@@ -2016,6 +2016,21 @@
         }
         .voice-bars { display: flex; align-items: center; justify-content: center; gap: 3px; height: 60px; width: 100%; }
         .voice-bar { width: 4px; min-height: 4px; border-radius: 2px; background: var(--accent-brand); transition: height 0.05s linear; }
+        /* Voice note playback bubble */
+        .voice-note-bubble { display: flex; align-items: center; gap: 8px; min-width: 200px; max-width: 260px; user-select: none; }
+        .voice-note-btn { flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.22); color: #fff; transition: background 0.15s; padding: 0; }
+        .voice-note-btn:hover { background: rgba(255,255,255,0.35); }
+        .voice-note-btn .icon { width: 15px; height: 15px; }
+        .msg-row.other .voice-note-btn { background: var(--accent-brand); }
+        .msg-row.other .voice-note-btn:hover { background: var(--accent-brand-hover); }
+        .voice-note-waveform-wrap { flex: 1; position: relative; height: 30px; cursor: pointer; display: flex; align-items: center; border-radius: 4px; overflow: hidden; }
+        .voice-note-waveform { display: flex; align-items: center; gap: 2px; height: 100%; width: 100%; padding: 4px 0; box-sizing: border-box; }
+        .voice-note-bar { width: 3px; border-radius: 2px; background: rgba(255,255,255,0.5); flex-shrink: 0; }
+        .msg-row.other .voice-note-bar { background: var(--accent-brand); opacity: 0.4; }
+        .voice-note-progress { position: absolute; top: 0; left: 0; bottom: 0; width: 0%; background: rgba(255,255,255,0.18); border-radius: 4px; pointer-events: none; transition: width 0.08s linear; }
+        .msg-row.other .voice-note-progress { background: rgba(108,93,211,0.13); }
+        .voice-note-duration { flex-shrink: 0; font-size: 11px; color: rgba(255,255,255,0.78); min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+        .msg-row.other .voice-note-duration { color: var(--text-muted); }
         .voice-record-idle-btn {
             width: 64px;
             height: 64px;
@@ -4374,6 +4389,7 @@
     // startChatSession() right after loadProfileStore() — see applyLoggedInProfile's note.
     let pendingProfileMergeData = null;
     let currentActiveUser = "";
+    let activeVoiceNoteAudio = null; // currently playing inline voice-note Audio object
     let unreadChats = [];
     // Richer than unreadChats (which only ever meant "unread message"): tracks WHAT
     // kind of thing is waiting — 'message' or 'game' — so the sidebar can show the
@@ -6520,7 +6536,9 @@
         crown: '<path d="m2 20 1.5-9L8 15l4-8 4 8 4.5-4L22 20z"/><line x1="2" y1="20" x2="22" y2="20"/>',
         rpsRock: '<ellipse cx="12" cy="13" rx="7" ry="6"/><path d="M8.5 7.5c0-2 1.6-3.5 3.5-3.5s3.5 1.5 3.5 3.5"/>',
         rpsPaper: '<rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/>',
-        rpsScissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="13.47" y1="14.47" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>'
+        rpsScissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="13.47" y1="14.47" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>',
+        play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+        pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
     };
     function icon(name, extraClass) {
         return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -13744,13 +13762,110 @@
                 if (isIncoming && !msg._revealed && !isAutoDownloadEnabled('media')) {
                     bubbleDiv.appendChild(buildMediaRevealPlaceholder(msg, 'Voice Note'));
                 } else {
-                    const audio = document.createElement('audio');
-                    audio.controls = true;
-                    audio.src = mediaData.fileData;
-                    audio.style.marginTop = '4px';
-                    audio.style.maxHeight = '32px';
-                    audio.style.filter = 'invert(0.9)';
-                    bubbleDiv.appendChild(audio);
+                    // Custom voice-note bubble — keep the outer .msg bubble visible
+                    bubbleDiv.classList.remove('media-only');
+
+                    const vnContainer = document.createElement('div');
+                    vnContainer.className = 'voice-note-bubble';
+
+                    const playBtn = document.createElement('button');
+                    playBtn.type = 'button';
+                    playBtn.className = 'voice-note-btn';
+                    playBtn.innerHTML = icon('play');
+
+                    const waveWrap = document.createElement('div');
+                    waveWrap.className = 'voice-note-waveform-wrap';
+
+                    const waveform = document.createElement('div');
+                    waveform.className = 'voice-note-waveform';
+
+                    const BAR_COUNT = 28;
+                    const barHeights = Array.from({length: BAR_COUNT}, () => Math.round(20 + Math.random() * 70));
+                    barHeights.forEach(h => {
+                        const bar = document.createElement('div');
+                        bar.className = 'voice-note-bar';
+                        bar.style.height = h + '%';
+                        waveform.appendChild(bar);
+                    });
+
+                    const progressEl = document.createElement('div');
+                    progressEl.className = 'voice-note-progress';
+
+                    waveWrap.appendChild(waveform);
+                    waveWrap.appendChild(progressEl);
+
+                    const durationEl = document.createElement('span');
+                    durationEl.className = 'voice-note-duration';
+                    durationEl.textContent = '0:00';
+
+                    vnContainer.appendChild(playBtn);
+                    vnContainer.appendChild(waveWrap);
+                    vnContainer.appendChild(durationEl);
+                    bubbleDiv.appendChild(vnContainer);
+
+                    const audioObj = new Audio(mediaData.fileData);
+
+                    function vnFmtTime(s) {
+                        if (!isFinite(s) || s < 0) return '0:00';
+                        const m = Math.floor(s / 60);
+                        const sec = Math.floor(s % 60);
+                        return `${m}:${sec.toString().padStart(2, '0')}`;
+                    }
+
+                    audioObj.addEventListener('loadedmetadata', () => {
+                        durationEl.textContent = vnFmtTime(audioObj.duration);
+                    });
+
+                    audioObj.addEventListener('timeupdate', () => {
+                        const pct = audioObj.duration ? (audioObj.currentTime / audioObj.duration) : 0;
+                        progressEl.style.width = (pct * 100) + '%';
+                        if (!audioObj.paused) durationEl.textContent = vnFmtTime(audioObj.currentTime);
+                    });
+
+                    audioObj.addEventListener('ended', () => {
+                        playBtn.innerHTML = icon('play');
+                        progressEl.style.width = '0%';
+                        durationEl.textContent = vnFmtTime(audioObj.duration || 0);
+                        activeVoiceNoteAudio = null;
+                    });
+
+                    function vnPauseOther() {
+                        if (activeVoiceNoteAudio && activeVoiceNoteAudio !== audioObj) {
+                            activeVoiceNoteAudio.pause();
+                            if (activeVoiceNoteAudio._vnPlayBtn) {
+                                activeVoiceNoteAudio._vnPlayBtn.innerHTML = icon('play');
+                            }
+                        }
+                    }
+
+                    playBtn.onclick = () => {
+                        if (audioObj.paused) {
+                            vnPauseOther();
+                            activeVoiceNoteAudio = audioObj;
+                            audioObj._vnPlayBtn = playBtn;
+                            audioObj.play();
+                            playBtn.innerHTML = icon('pause');
+                        } else {
+                            audioObj.pause();
+                            playBtn.innerHTML = icon('play');
+                            activeVoiceNoteAudio = null;
+                        }
+                    };
+
+                    waveWrap.onclick = (e) => {
+                        if (!audioObj.duration) return;
+                        const rect = waveWrap.getBoundingClientRect();
+                        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                        audioObj.currentTime = pct * audioObj.duration;
+                        progressEl.style.width = (pct * 100) + '%';
+                        if (audioObj.paused) {
+                            vnPauseOther();
+                            activeVoiceNoteAudio = audioObj;
+                            audioObj._vnPlayBtn = playBtn;
+                            audioObj.play();
+                            playBtn.innerHTML = icon('pause');
+                        }
+                    };
                 }
             } else if (mediaData.fileType === 'document') {
                 if (isIncoming && !msg._revealed && !isAutoDownloadEnabled('media')) {
@@ -13853,11 +13968,20 @@
     // scrolled up reading older messages for more than a few seconds. Now it only
     // auto-scrolls if you were already near the bottom; otherwise your reading
     // position (distance from the bottom) is preserved across the rebuild.
+    function stopActiveVoiceNote() {
+        if (activeVoiceNoteAudio) {
+            activeVoiceNoteAudio.pause();
+            if (activeVoiceNoteAudio._vnPlayBtn) activeVoiceNoteAudio._vnPlayBtn.innerHTML = icon('play');
+            activeVoiceNoteAudio = null;
+        }
+    }
+
     function reloadChatHistoryScreen(forceScrollBottom) {
         const container = document.getElementById('messages');
         const wasNearBottom = forceScrollBottom || (container.scrollHeight - container.scrollTop - container.clientHeight) < 120;
         const distanceFromBottom = container.scrollHeight - container.scrollTop;
 
+        stopActiveVoiceNote();
         container.innerHTML = "";
         document.getElementById('pinnedMessageBanner').style.display = 'none';
 
