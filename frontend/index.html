@@ -58,7 +58,7 @@
         :root {
             --bg-main: #EEECF7;
             --bg-sidebar: #FBFAFE;
-            --bg-chat: #F5F2FA;
+            --bg-chat: #FAF7F2;
             --menu-surface: rgba(251, 250, 254, 0.97);
             --accent-brand: #6C5DD3;
             --accent-brand-hover: #5847B8;
@@ -1467,8 +1467,16 @@
             word-break: break-word;
             position: relative;
             font-family: var(--font-stack);
-            transition: background-color 0.4s ease, transform 0.2s ease;
+            transition: background-color 0.4s ease, transform 0.18s ease, box-shadow 0.18s ease;
             box-shadow: 0 1px 1px rgba(0, 0, 0, 0.15);
+        }
+        .msg:hover {
+            transform: scale(1.01) translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .msg.emoji-only:hover, .msg.media-only:hover {
+            transform: none;
+            box-shadow: none;
         }
         /* Glass bubbles -- translucent + blurred rather than a flat fill, so the
            watermark birds (and the chat bubble's own moving gradient) actually show
@@ -1477,20 +1485,24 @@
            of DOM nesting, so this picks up the watermark layer (z-index:-1 sibling
            of #messages) correctly without any extra wiring. */
         .msg-row.user .msg {
-            background: rgba(108, 93, 211, 0.78);
-            backdrop-filter: blur(10px) saturate(160%);
-            -webkit-backdrop-filter: blur(10px) saturate(160%);
-            border: 1px solid rgba(255, 255, 255, 0.28);
+            background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+            border: 1px solid rgba(255, 255, 255, 0.22);
             color: #fff;
             border-bottom-right-radius: var(--bubble-radius-tail);
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
+        }
+        .msg-row.user .msg:hover {
+            box-shadow: 0 5px 16px rgba(79, 70, 229, 0.45);
         }
         .msg-row.other .msg {
-            background: rgba(255, 255, 255, 0.62);
-            backdrop-filter: blur(10px) saturate(160%);
-            -webkit-backdrop-filter: blur(10px) saturate(160%);
-            border: 1px solid rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(0, 0, 0, 0.06);
             color: var(--text-normal);
             border-bottom-left-radius: var(--bubble-radius-tail);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+        :root[data-theme="dark"] .msg-row.user .msg {
+            background: linear-gradient(135deg, #4338CA 0%, #6D28D9 100%);
         }
         :root[data-theme="dark"] .msg-row.other .msg {
             background: rgba(255, 255, 255, 0.09);
@@ -1913,7 +1925,7 @@
             height: 44px;
             padding: 0;
             border-radius: 50%;
-            background: var(--accent-brand);
+            background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
             color: #fff;
             border: none;
             cursor: pointer;
@@ -1921,10 +1933,11 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            transition: transform 0.1s ease, background-color 0.15s ease;
+            transition: transform 0.1s ease, box-shadow 0.15s ease;
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.4);
         }
         .chat-input-area button.send-btn .icon { width: 18px; height: 18px; }
-        .chat-input-area button.send-btn:hover { background: var(--accent-brand-hover); }
+        .chat-input-area button.send-btn:hover { box-shadow: 0 4px 14px rgba(79, 70, 229, 0.55); }
         .chat-input-area button.send-btn:active { transform: scale(0.9); }
 
         /* Only shown once you've scrolled up away from the bottom (see
