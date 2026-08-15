@@ -9,6 +9,7 @@
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5",
     "redis": "^4.6.13",
