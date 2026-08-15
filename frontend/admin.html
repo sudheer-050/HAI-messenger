@@ -151,6 +151,29 @@
     .hai-toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     .hai-toast { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; box-shadow: var(--shadow); pointer-events: all; cursor: pointer; white-space: nowrap; max-width: 340px; }
     .hai-toast.error { border-color: var(--accent-red); color: var(--accent-red); }
+
+    /* THEME PANEL */
+    .theme-panel { display: none; }
+    .theme-panel.active { display: block; }
+    .theme-section-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .theme-mode-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+    .theme-mode-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    .theme-token-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .theme-token-label { font-size: 12px; color: var(--text-muted); flex: 1; }
+    .theme-token-row input[type=color] { width: 40px; height: 28px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; padding: 2px; background: var(--bg-main); }
+    .theme-token-hex { font-size: 11px; color: var(--text-muted); font-family: monospace; width: 72px; }
+    .theme-preview { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); margin-bottom: 20px; }
+    .theme-preview-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    .theme-preview-wrap { display: flex; gap: 16px; }
+    .theme-preview-pane { flex: 1; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+    .theme-preview-sidebar { padding: 10px 8px; font-size: 11px; font-weight: 600; }
+    .theme-preview-chat { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .theme-preview-bubble { display: inline-block; padding: 5px 9px; border-radius: 10px; font-size: 11px; max-width: 80%; }
+    .theme-preview-bubble.sent { align-self: flex-end; color: #fff; }
+    .theme-preview-bubble.recv { align-self: flex-start; }
+    .theme-preview-label { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: 4px; }
+    .theme-save-row { display: flex; gap: 10px; align-items: center; }
+    .theme-save-status { font-size: 12px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -178,20 +201,125 @@
             <div class="sidebar-heading">Dashboards</div>
             <div id="dashboardList"></div>
             <button type="button" class="btn small" style="width:100%; margin-top:8px;" onclick="createDashboard()">+ New Dashboard</button>
+            <div class="sidebar-heading" style="margin-top:18px;">Settings</div>
+            <div class="dash-row" id="themeNavItem" onclick="openThemePanel()">🎨 Theme Colors</div>
         </div>
 
         <div class="main">
-            <div class="overview-grid" id="overviewGrid"></div>
+            <div id="dashboardView">
+                <div class="overview-grid" id="overviewGrid"></div>
 
-            <div class="dashboard-header">
-                <h2 id="activeDashboardName">Dashboard</h2>
-                <div class="dashboard-header-actions">
-                    <button type="button" class="btn small" onclick="openReportsModal()">📧 Scheduled Reports</button>
-                    <button type="button" class="btn small primary" onclick="openWidgetModal()">+ Add Widget</button>
+                <div class="dashboard-header">
+                    <h2 id="activeDashboardName">Dashboard</h2>
+                    <div class="dashboard-header-actions">
+                        <button type="button" class="btn small" onclick="openReportsModal()">📧 Scheduled Reports</button>
+                        <button type="button" class="btn small primary" onclick="openWidgetModal()">+ Add Widget</button>
+                    </div>
                 </div>
+
+                <div id="widgetGrid" class="widget-grid"></div>
             </div>
 
-            <div id="widgetGrid" class="widget-grid"></div>
+            <div id="themePanel" class="theme-panel">
+                <div class="dashboard-header">
+                    <h2>Theme Colors</h2>
+                    <div class="dashboard-header-actions">
+                        <button type="button" class="btn small" onclick="closeThemePanel()">← Back</button>
+                    </div>
+                </div>
+
+                <div class="theme-section-grid">
+                    <div class="theme-mode-card">
+                        <div class="theme-mode-title">Light Mode</div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Accent Brand</span>
+                            <input type="color" id="lp-accentBrand" oninput="updateHex('lp-accentBrand','lh-accentBrand'); updatePreview()">
+                            <span class="theme-token-hex" id="lh-accentBrand"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Accent Brand Hover</span>
+                            <input type="color" id="lp-accentBrandHover" oninput="updateHex('lp-accentBrandHover','lh-accentBrandHover'); updatePreview()">
+                            <span class="theme-token-hex" id="lh-accentBrandHover"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Background Main</span>
+                            <input type="color" id="lp-bgMain" oninput="updateHex('lp-bgMain','lh-bgMain'); updatePreview()">
+                            <span class="theme-token-hex" id="lh-bgMain"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Background Chat</span>
+                            <input type="color" id="lp-bgChat" oninput="updateHex('lp-bgChat','lh-bgChat'); updatePreview()">
+                            <span class="theme-token-hex" id="lh-bgChat"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Background Sidebar</span>
+                            <input type="color" id="lp-bgSidebar" oninput="updateHex('lp-bgSidebar','lh-bgSidebar'); updatePreview()">
+                            <span class="theme-token-hex" id="lh-bgSidebar"></span>
+                        </div>
+                    </div>
+
+                    <div class="theme-mode-card">
+                        <div class="theme-mode-title">Dark Mode</div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Accent Brand</span>
+                            <input type="color" id="dp-accentBrand" oninput="updateHex('dp-accentBrand','dh-accentBrand'); updatePreview()">
+                            <span class="theme-token-hex" id="dh-accentBrand"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Accent Brand Hover</span>
+                            <input type="color" id="dp-accentBrandHover" oninput="updateHex('dp-accentBrandHover','dh-accentBrandHover'); updatePreview()">
+                            <span class="theme-token-hex" id="dh-accentBrandHover"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Background Main</span>
+                            <input type="color" id="dp-bgMain" oninput="updateHex('dp-bgMain','dh-bgMain'); updatePreview()">
+                            <span class="theme-token-hex" id="dh-bgMain"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Background Chat</span>
+                            <input type="color" id="dp-bgChat" oninput="updateHex('dp-bgChat','dh-bgChat'); updatePreview()">
+                            <span class="theme-token-hex" id="dh-bgChat"></span>
+                        </div>
+                        <div class="theme-token-row">
+                            <span class="theme-token-label">Background Sidebar</span>
+                            <input type="color" id="dp-bgSidebar" oninput="updateHex('dp-bgSidebar','dh-bgSidebar'); updatePreview()">
+                            <span class="theme-token-hex" id="dh-bgSidebar"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="theme-preview">
+                    <div class="theme-preview-title">Preview</div>
+                    <div class="theme-preview-wrap">
+                        <div style="flex:1;">
+                            <div class="theme-preview-pane" id="previewLight">
+                                <div class="theme-preview-sidebar" id="previewLightSidebar">HAI Messenger</div>
+                                <div class="theme-preview-chat" id="previewLightChat">
+                                    <div class="theme-preview-bubble recv" id="previewLightRecv">Hey, what's up?</div>
+                                    <div class="theme-preview-bubble sent" id="previewLightSent">All good! 🎨</div>
+                                </div>
+                            </div>
+                            <div class="theme-preview-label">Light</div>
+                        </div>
+                        <div style="flex:1;">
+                            <div class="theme-preview-pane" id="previewDark">
+                                <div class="theme-preview-sidebar" id="previewDarkSidebar" style="color:#e8eaed;">HAI Messenger</div>
+                                <div class="theme-preview-chat" id="previewDarkChat">
+                                    <div class="theme-preview-bubble recv" id="previewDarkRecv" style="color:#e8eaed;">Hey, what's up?</div>
+                                    <div class="theme-preview-bubble sent" id="previewDarkSent">All good! 🎨</div>
+                                </div>
+                            </div>
+                            <div class="theme-preview-label">Dark</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="theme-save-row">
+                    <button type="button" class="btn primary" onclick="saveTheme()">Save Theme</button>
+                    <button type="button" class="btn" onclick="resetTheme()">Reset to Defaults</button>
+                    <span class="theme-save-status" id="themeSaveStatus"></span>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -750,6 +878,137 @@
     }
 
     init();
+
+    /* THEME PANEL */
+    const THEME_DEFAULTS = {
+        light: { accentBrand: '#6C5DD3', accentBrandHover: '#5847B8', bgMain: '#EEECF7', bgChat: '#FAF7F2', bgSidebar: '#FBFAFE' },
+        dark:  { accentBrand: '#9B8AFB', accentBrandHover: '#8171E8', bgMain: '#17151E', bgChat: '#15121C', bgSidebar: '#201C29' }
+    };
+
+    function updateHex(pickerId, hexId) {
+        document.getElementById(hexId).textContent = document.getElementById(pickerId).value.toUpperCase();
+    }
+
+    function setPickerValue(pickerId, hexId, value) {
+        const input = document.getElementById(pickerId);
+        if (input) {
+            input.value = hexTo6(value);
+            document.getElementById(hexId).textContent = hexTo6(value).toUpperCase();
+        }
+    }
+
+    function hexTo6(hex) {
+        if (!hex) return '#000000';
+        hex = hex.trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+        if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
+            const [, r, g, b] = hex.match(/^#(.)(.)(.)$/);
+            return '#' + r + r + g + g + b + b;
+        }
+        return '#000000';
+    }
+
+    function updatePreview() {
+        const lAccent = document.getElementById('lp-accentBrand').value;
+        const lBgMain = document.getElementById('lp-bgMain').value;
+        const lBgChat = document.getElementById('lp-bgChat').value;
+        const lBgSidebar = document.getElementById('lp-bgSidebar').value;
+
+        const dAccent = document.getElementById('dp-accentBrand').value;
+        const dBgMain = document.getElementById('dp-bgMain').value;
+        const dBgChat = document.getElementById('dp-bgChat').value;
+        const dBgSidebar = document.getElementById('dp-bgSidebar').value;
+
+        document.getElementById('previewLight').style.background = lBgMain;
+        document.getElementById('previewLightSidebar').style.background = lBgSidebar;
+        document.getElementById('previewLightChat').style.background = lBgChat;
+        document.getElementById('previewLightSent').style.background = lAccent;
+        document.getElementById('previewLightRecv').style.background = lBgSidebar;
+
+        document.getElementById('previewDark').style.background = dBgMain;
+        document.getElementById('previewDarkSidebar').style.background = dBgSidebar;
+        document.getElementById('previewDarkChat').style.background = dBgChat;
+        document.getElementById('previewDarkSent').style.background = dAccent;
+        document.getElementById('previewDarkRecv').style.background = dBgSidebar;
+    }
+
+    function fillThemePickers(theme) {
+        const l = theme.light, d = theme.dark;
+        setPickerValue('lp-accentBrand', 'lh-accentBrand', l.accentBrand);
+        setPickerValue('lp-accentBrandHover', 'lh-accentBrandHover', l.accentBrandHover);
+        setPickerValue('lp-bgMain', 'lh-bgMain', l.bgMain);
+        setPickerValue('lp-bgChat', 'lh-bgChat', l.bgChat);
+        setPickerValue('lp-bgSidebar', 'lh-bgSidebar', l.bgSidebar);
+
+        setPickerValue('dp-accentBrand', 'dh-accentBrand', d.accentBrand);
+        setPickerValue('dp-accentBrandHover', 'dh-accentBrandHover', d.accentBrandHover);
+        setPickerValue('dp-bgMain', 'dh-bgMain', d.bgMain);
+        setPickerValue('dp-bgChat', 'dh-bgChat', d.bgChat);
+        setPickerValue('dp-bgSidebar', 'dh-bgSidebar', d.bgSidebar);
+
+        updatePreview();
+    }
+
+    async function openThemePanel() {
+        document.getElementById('dashboardView').style.display = 'none';
+        document.getElementById('themePanel').classList.add('active');
+        document.getElementById('themeNavItem').classList.add('active');
+        document.getElementById('themeSaveStatus').textContent = '';
+
+        try {
+            const theme = await authFetchJSON('/api/admin/theme', 'GET');
+            fillThemePickers(theme);
+        } catch (err) {
+            showToast('Could not load theme settings: ' + err.message, 'error');
+            fillThemePickers(THEME_DEFAULTS);
+        }
+    }
+
+    function closeThemePanel() {
+        document.getElementById('dashboardView').style.display = '';
+        document.getElementById('themePanel').classList.remove('active');
+        document.getElementById('themeNavItem').classList.remove('active');
+    }
+
+    async function saveTheme() {
+        const body = {
+            light: {
+                accentBrand: document.getElementById('lp-accentBrand').value,
+                accentBrandHover: document.getElementById('lp-accentBrandHover').value,
+                bgMain: document.getElementById('lp-bgMain').value,
+                bgChat: document.getElementById('lp-bgChat').value,
+                bgSidebar: document.getElementById('lp-bgSidebar').value
+            },
+            dark: {
+                accentBrand: document.getElementById('dp-accentBrand').value,
+                accentBrandHover: document.getElementById('dp-accentBrandHover').value,
+                bgMain: document.getElementById('dp-bgMain').value,
+                bgChat: document.getElementById('dp-bgChat').value,
+                bgSidebar: document.getElementById('dp-bgSidebar').value
+            }
+        };
+        const statusEl = document.getElementById('themeSaveStatus');
+        try {
+            await authFetchJSON('/api/admin/theme', 'PUT', body);
+            statusEl.textContent = 'Saved!';
+            setTimeout(() => { statusEl.textContent = ''; }, 2500);
+        } catch (err) {
+            showToast('Save failed: ' + err.message, 'error');
+        }
+    }
+
+    async function resetTheme() {
+        if (!await showConfirm('Reset all theme colors to defaults? This will overwrite any saved customizations.')) return;
+        const statusEl = document.getElementById('themeSaveStatus');
+        try {
+            await authFetchJSON('/api/admin/theme', 'PUT', THEME_DEFAULTS);
+            fillThemePickers(THEME_DEFAULTS);
+            statusEl.textContent = 'Reset to defaults.';
+            setTimeout(() => { statusEl.textContent = ''; }, 2500);
+        } catch (err) {
+            showToast('Reset failed: ' + err.message, 'error');
+        }
+    }
 </script>
 </body>
 </html>

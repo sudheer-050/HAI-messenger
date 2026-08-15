@@ -4425,6 +4425,8 @@
     let isCurrentlyTyping = false;
     let outgoingTypingTimeout = null;
 
+    let _remoteTheme = null;
+
     let currentAuthMode = 'login';
     let pendingRegistrationData = {};
 
@@ -11247,6 +11249,33 @@
         const darkBtn = document.getElementById('themeBtn-dark');
         if (lightBtn) lightBtn.classList.toggle('active', mode === 'light');
         if (darkBtn) darkBtn.classList.toggle('active', mode === 'dark');
+        _applyRemoteThemeColors();
+    }
+
+    function _applyRemoteThemeColors() {
+        if (!_remoteTheme) return;
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const colors = isDark ? _remoteTheme.dark : _remoteTheme.light;
+        const root = document.documentElement;
+        const map = {
+            accentBrand: '--accent-brand',
+            accentBrandHover: '--accent-brand-hover',
+            bgMain: '--bg-main',
+            bgChat: '--bg-chat',
+            bgSidebar: '--bg-sidebar'
+        };
+        for (const [key, prop] of Object.entries(map)) {
+            if (colors[key]) root.style.setProperty(prop, colors[key]);
+        }
+    }
+
+    async function applyRemoteTheme() {
+        try {
+            const res = await fetch('/api/theme');
+            if (!res.ok) return;
+            _remoteTheme = await res.json();
+            _applyRemoteThemeColors();
+        } catch {}
     }
 
 
@@ -14425,6 +14454,7 @@
 
     hydrateStaticIcons();
     applyStoredTheme();
+    applyRemoteTheme();
     // Must run BEFORE attemptAutoLogin(): a valid stored session makes that function
     // synchronously hide #setup before its first await, which would leave this
     // generating against a 0x0 container (display:none) and produce nothing.
