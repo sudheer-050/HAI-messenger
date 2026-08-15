@@ -100,6 +100,14 @@ pgPool.query(`
     );
 `).then(() => console.log('📊 Postgres analytics tables ready')).catch(err => console.error('Postgres analytics init failed:', err.message));
 
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS app_theme_settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+`).then(() => console.log('🎨 Postgres theme settings table ready')).catch(err => console.error('Postgres theme init failed:', err.message));
+
 // Fire-and-forget metadata-only event log -- never awaited by the caller's own
 // success path, so a logging failure can't take down the feature that called it.
 function logAnalyticsEvent(eventType, username) {
@@ -1662,6 +1670,127 @@ async function sendScheduledReports() {
     }
 }
 setInterval(sendScheduledReports, 60 * 60 * 1000);
+
+/* ============ THEME SETTINGS ============
+   Colors-only admin override for the five brand/background CSS tokens.
+   GET /api/theme is public and cached in-memory — it's on every page-load's
+   hot path. PUT /api/admin/theme uses a strict allowlist regex so an admin
+   can't inject arbitrary CSS into every user's page. */
+
+// Strict allowlist: clean hex (#rgb, #rrggbb, #rrggbbaa) or plain rgb/rgba
+// with numeric-only components. Rejects CSS functions, selectors, variables,
+// and any other free-form text.
+const COLOR_REGEX = /^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(0|1|0?\.\d+)\s*\))$/;
+
+const THEME_TOKENS = ['accentBrand', 'accentBrandHover', 'bgMain', 'bgChat', 'bgSidebar'];
+
+const THEME_DEFAULTS = {
+    light: {
+        accentBrand: '#6C5DD3',
+        accentBrandHover: '#5847B8',
+        bgMain: '#EEECF7',
+        bgChat: '#FAF7F2',
+        bgSidebar: '#FBFAFE',
+    },
+    dark: {
+        accentBrand: '#9B8AFB',
+        accentBrandHover: '#8171E8',
+        bgMain: '#17151E',
+        bgChat: '#15121C',
+        bgSidebar: '#201C29',
+    }
+};
+
+// In-memory cache for the effective theme — invalidated on every successful PUT.
+// Avoids a Postgres round-trip on every page load for a rarely-changing config.
+let themeCache = null;
+
+async function getEffectiveTheme() {
+    if (themeCache) return themeCache;
+    const rows = await pgPool.query('SELECT key, value FROM app_theme_settings');
+    const overrides = {};
+    for (const row of rows.rows) overrides[row.key] = row.value;
+    const theme = {
+        light: { ...THEME_DEFAULTS.light },
+        dark:  { ...THEME_DEFAULTS.dark  }
+    };
+    for (const mode of ['light', 'dark']) {
+        for (const token of THEME_TOKENS) {
+            const k = `${mode}.${token}`;
+            if (overrides[k]) theme[mode][token] = overrides[k];
+        }
+    }
+    themeCache = theme;
+    return theme;
+}
+
+// Public — fetched on every page load to apply the current brand colors.
+app.get('/api/theme', async (req, res) => {
+    try {
+        const theme = await getEffectiveTheme();
+        res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        res.json(theme);
+    } catch (err) {
+        console.error('GET /api/theme failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Admin — prefills the color pickers in the admin panel.
+app.get('/api/admin/theme', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        res.json(await getEffectiveTheme());
+    } catch (err) {
+        console.error('GET /api/admin/theme failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Admin — persists theme color overrides. Partial updates accepted; only
+// keys present in the body are written. Every value is validated before any
+// write occurs, so a mixed-valid/invalid body is rejected atomically.
+app.put('/api/admin/theme', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const invalid = [];
+        const writes = [];
+
+        for (const mode of ['light', 'dark']) {
+            const modeBody = body[mode];
+            if (!modeBody || typeof modeBody !== 'object') continue;
+            for (const token of THEME_TOKENS) {
+                if (!(token in modeBody)) continue;
+                const val = modeBody[token];
+                if (typeof val !== 'string' || !COLOR_REGEX.test(val.trim())) {
+                    invalid.push(`${mode}.${token}`);
+                } else {
+                    writes.push({ key: `${mode}.${token}`, value: val.trim() });
+                }
+            }
+        }
+
+        if (invalid.length) {
+            return res.status(400).json({ error: 'Invalid color value(s)', fields: invalid });
+        }
+        if (!writes.length) {
+            return res.status(400).json({ error: 'No valid theme tokens provided.' });
+        }
+
+        for (const { key, value } of writes) {
+            await pgPool.query(
+                `INSERT INTO app_theme_settings (key, value, updated_at)
+                 VALUES ($1, $2, now())
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+                [key, value]
+            );
+        }
+        themeCache = null;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('PUT /api/admin/theme failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
 
 io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
