@@ -151,6 +151,28 @@
     .hai-toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     .hai-toast { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; box-shadow: var(--shadow); pointer-events: all; cursor: pointer; white-space: nowrap; max-width: 340px; }
     .hai-toast.error { border-color: var(--accent-red); color: var(--accent-red); }
+
+    /* THEME EDITOR */
+    .sidebar-sep { height: 1px; background: var(--border); margin: 10px 6px; }
+    .theme-mode-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+    .theme-mode-tab { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-main); color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .theme-mode-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .color-token-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .color-token-row { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .color-token-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+    .color-token-inputs { display: flex; align-items: center; gap: 8px; }
+    .color-token-inputs input[type="color"] { width: 38px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--bg-main); flex-shrink: 0; }
+    .color-token-inputs input[type="text"] { flex: 1; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-main); color: var(--text-normal); font-size: 13px; font-family: monospace; }
+    .theme-preview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
+    .theme-preview-header { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 12px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.04em; }
+    .theme-preview-mock { display: flex; height: 96px; }
+    .theme-preview-sidebar { width: 64px; flex-shrink: 0; padding: 10px 8px; display: flex; flex-direction: column; gap: 5px; }
+    .theme-preview-swatch { height: 7px; border-radius: 4px; background: rgba(128,128,128,0.3); }
+    .theme-preview-swatch.wide { width: 80%; }
+    .theme-preview-swatch.narrow { width: 55%; }
+    .theme-preview-chat { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; padding: 10px; gap: 5px; }
+    .theme-preview-bubble-in { align-self: flex-start; padding: 5px 9px; border-radius: 8px 8px 8px 2px; font-size: 9px; background: rgba(128,128,128,0.15); max-width: 60%; }
+    .theme-preview-bubble-out { align-self: flex-end; padding: 5px 9px; border-radius: 8px 8px 2px 8px; font-size: 9px; color: #fff; max-width: 60%; }
 </style>
 </head>
 <body>
@@ -178,6 +200,11 @@
             <div class="sidebar-heading">Dashboards</div>
             <div id="dashboardList"></div>
             <button type="button" class="btn small" style="width:100%; margin-top:8px;" onclick="createDashboard()">+ New Dashboard</button>
+            <div class="sidebar-sep"></div>
+            <div class="sidebar-heading">Settings</div>
+            <div class="dash-row" id="themeNavRow" onclick="switchToTheme()">
+                <span>🎨 Theme Colors</span>
+            </div>
         </div>
 
         <div class="main">
@@ -192,6 +219,40 @@
             </div>
 
             <div id="widgetGrid" class="widget-grid"></div>
+
+            <!-- THEME EDITOR PANEL (replaces widget grid when active) -->
+            <div id="themePanel" style="display:none;">
+                <div class="dashboard-header">
+                    <h2>Brand Colors</h2>
+                    <div class="dashboard-header-actions">
+                        <button type="button" class="btn" onclick="resetThemeDefaults()">Reset to Defaults</button>
+                        <button type="button" class="btn primary" onclick="saveTheme()">Save Changes</button>
+                    </div>
+                </div>
+
+                <div class="theme-mode-tabs">
+                    <button type="button" class="theme-mode-tab active" id="themeTabLight" onclick="switchThemeEditorMode('light')">☀️ Light</button>
+                    <button type="button" class="theme-mode-tab" id="themeTabDark" onclick="switchThemeEditorMode('dark')">🌙 Dark</button>
+                </div>
+
+                <div class="theme-preview-card">
+                    <div class="theme-preview-header">Preview</div>
+                    <div class="theme-preview-mock" id="themePreviewMock">
+                        <div class="theme-preview-sidebar" id="themePreviewSidebar">
+                            <div class="theme-preview-swatch wide"></div>
+                            <div class="theme-preview-swatch narrow"></div>
+                            <div class="theme-preview-swatch wide"></div>
+                            <div class="theme-preview-swatch narrow"></div>
+                        </div>
+                        <div class="theme-preview-chat" id="themePreviewChat">
+                            <div class="theme-preview-bubble-in">Hello!</div>
+                            <div class="theme-preview-bubble-out" id="themePreviewBubbleOut">Hey there 👋</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="color-token-grid" id="themeColorGrid"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -392,7 +453,7 @@
     function renderDashboardList() {
         const container = document.getElementById('dashboardList');
         container.innerHTML = dashboards.map(d => `
-            <div class="dash-row ${d.id === activeDashboardId ? 'active' : ''}" onclick="selectDashboard('${d.id}')">
+            <div class="dash-row ${activeView === 'dashboard' && d.id === activeDashboardId ? 'active' : ''}" onclick="selectDashboard('${d.id}')">
                 <span>${d.name}</span>
                 <span class="dash-row-actions" onclick="event.stopPropagation()">
                     <button type="button" title="Rename" onclick="renameDashboard('${d.id}')">✎</button>
@@ -404,8 +465,12 @@
 
     function selectDashboard(id) {
         activeDashboardId = id;
-        renderDashboardList();
-        renderActiveDashboard();
+        if (activeView === 'theme') {
+            switchToDashboardView();
+        } else {
+            renderDashboardList();
+            renderActiveDashboard();
+        }
     }
 
     async function createDashboard() {
@@ -747,6 +812,148 @@
             ov.onclick = e => { if (e.target === ov) done(null); };
             inp.onkeydown = e => { if (e.key === 'Enter') done(inp.value); if (e.key === 'Escape') done(null); };
         });
+    }
+
+    /* THEME EDITOR */
+    const THEME_TOKEN_LABELS = {
+        accentBrand:      'Accent Brand',
+        accentBrandHover: 'Accent Brand Hover',
+        bgMain:           'Background Main',
+        bgChat:           'Background Chat',
+        bgSidebar:        'Background Sidebar'
+    };
+    const THEME_DEFAULTS = {
+        light: { accentBrand: '#6C5DD3', accentBrandHover: '#5847B8', bgMain: '#EEECF7', bgChat: '#FAF7F2', bgSidebar: '#FBFAFE' },
+        dark:  { accentBrand: '#9B8AFB', accentBrandHover: '#8171E8', bgMain: '#17151E', bgChat: '#15121C', bgSidebar: '#201C29' }
+    };
+
+    let themeData = null;
+    let themeEditorMode = 'light';
+    let activeView = 'dashboard';
+
+    async function switchToTheme() {
+        activeView = 'theme';
+        document.getElementById('overviewGrid').style.display = 'none';
+        document.querySelector('.dashboard-header').style.display = 'none';
+        document.getElementById('widgetGrid').style.display = 'none';
+        document.getElementById('themePanel').style.display = 'block';
+        document.getElementById('themeNavRow').classList.add('active');
+        renderDashboardList();
+        if (!themeData) await loadThemeEditor();
+        else renderThemeEditor();
+    }
+
+    function switchToDashboardView() {
+        activeView = 'dashboard';
+        document.getElementById('overviewGrid').style.display = '';
+        document.querySelector('.dashboard-header').style.display = '';
+        document.getElementById('widgetGrid').style.display = '';
+        document.getElementById('themePanel').style.display = 'none';
+        document.getElementById('themeNavRow').classList.remove('active');
+        renderDashboardList();
+        renderActiveDashboard();
+    }
+
+    async function loadThemeEditor() {
+        try {
+            themeData = await authFetchJSON('/api/admin/theme', 'GET');
+        } catch (err) {
+            showToast('Could not load theme: ' + err.message, 'error');
+            themeData = JSON.parse(JSON.stringify(THEME_DEFAULTS));
+        }
+        renderThemeEditor();
+    }
+
+    function renderThemeEditor() {
+        document.getElementById('themeTabLight').classList.toggle('active', themeEditorMode === 'light');
+        document.getElementById('themeTabDark').classList.toggle('active', themeEditorMode === 'dark');
+
+        const modeColors = (themeData && themeData[themeEditorMode]) || {};
+        const grid = document.getElementById('themeColorGrid');
+        grid.innerHTML = Object.keys(THEME_TOKEN_LABELS).map(key => {
+            const val = modeColors[key] || THEME_DEFAULTS[themeEditorMode][key];
+            return `
+                <div class="color-token-row">
+                    <div class="color-token-label">${THEME_TOKEN_LABELS[key]}</div>
+                    <div class="color-token-inputs">
+                        <input type="color" id="tc-${key}" value="${toHexColor(val)}" oninput="onThemeColorPicker('${key}', this.value)">
+                        <input type="text" id="tc-text-${key}" value="${val}" onchange="onThemeColorText('${key}', this.value)" onblur="onThemeColorText('${key}', this.value)">
+                    </div>
+                </div>`;
+        }).join('');
+
+        updateThemePreview();
+    }
+
+    function toHexColor(val) {
+        if (!val) return '#000000';
+        const m = val.trim().match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+        return m ? (m[1].length === 3
+            ? '#' + m[1].split('').map(c => c + c).join('')
+            : val.trim()) : '#000000';
+    }
+
+    function onThemeColorPicker(key, value) {
+        if (!themeData[themeEditorMode]) themeData[themeEditorMode] = {};
+        themeData[themeEditorMode][key] = value;
+        const textEl = document.getElementById('tc-text-' + key);
+        if (textEl) textEl.value = value;
+        updateThemePreview();
+    }
+
+    function onThemeColorText(key, value) {
+        const v = value.trim();
+        const hexRe = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+        const rgbRe = /^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(\s*,\s*(0|1|0?\.\d+))?\s*\)$/;
+        if (hexRe.test(v) || rgbRe.test(v)) {
+            if (!themeData[themeEditorMode]) themeData[themeEditorMode] = {};
+            themeData[themeEditorMode][key] = v;
+            const pickerEl = document.getElementById('tc-' + key);
+            if (pickerEl) pickerEl.value = toHexColor(v);
+            updateThemePreview();
+        } else {
+            const current = (themeData[themeEditorMode] || {})[key] || THEME_DEFAULTS[themeEditorMode][key];
+            document.getElementById('tc-text-' + key).value = current;
+        }
+    }
+
+    function updateThemePreview() {
+        const mode = themeEditorMode;
+        const colors = Object.assign({}, THEME_DEFAULTS[mode], (themeData && themeData[mode]) || {});
+        const sidebar = document.getElementById('themePreviewSidebar');
+        const chat = document.getElementById('themePreviewChat');
+        const mock = document.getElementById('themePreviewMock');
+        const bubbleOut = document.getElementById('themePreviewBubbleOut');
+        if (mock) mock.style.background = colors.bgMain;
+        if (sidebar) sidebar.style.background = colors.bgSidebar;
+        if (chat) chat.style.background = colors.bgChat;
+        if (bubbleOut) bubbleOut.style.background = colors.accentBrand;
+    }
+
+    function switchThemeEditorMode(mode) {
+        themeEditorMode = mode;
+        renderThemeEditor();
+    }
+
+    async function saveTheme() {
+        try {
+            await authFetchJSON('/api/admin/theme', 'PUT', themeData);
+            showToast('Theme saved successfully.');
+        } catch (err) {
+            showToast('Save failed: ' + err.message, 'error');
+        }
+    }
+
+    async function resetThemeDefaults() {
+        if (!await showConfirm('Reset all colors to defaults? This cannot be undone.')) return;
+        try {
+            await authFetchJSON('/api/admin/theme', 'PUT', THEME_DEFAULTS);
+            themeData = JSON.parse(JSON.stringify(THEME_DEFAULTS));
+            renderThemeEditor();
+            showToast('Theme reset to defaults.');
+        } catch (err) {
+            showToast('Reset failed: ' + err.message, 'error');
+        }
     }
 
     init();

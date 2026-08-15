@@ -11247,6 +11247,36 @@
         const darkBtn = document.getElementById('themeBtn-dark');
         if (lightBtn) lightBtn.classList.toggle('active', mode === 'light');
         if (darkBtn) darkBtn.classList.toggle('active', mode === 'dark');
+        applyRemoteThemeColors();
+    }
+
+    const _THEME_CSS_VARS = {
+        accentBrand: '--accent-brand',
+        accentBrandHover: '--accent-brand-hover',
+        bgMain: '--bg-main',
+        bgChat: '--bg-chat',
+        bgSidebar: '--bg-sidebar'
+    };
+    let _remoteThemeColors = null;
+
+    function applyRemoteThemeColors() {
+        if (!_remoteThemeColors) return;
+        const mode = document.documentElement.getAttribute('data-theme') || 'light';
+        const colors = _remoteThemeColors[mode];
+        if (!colors) return;
+        const rootStyle = document.documentElement.style;
+        for (const [key, cssVar] of Object.entries(_THEME_CSS_VARS)) {
+            if (colors[key]) rootStyle.setProperty(cssVar, colors[key]);
+        }
+    }
+
+    async function fetchAndApplyRemoteTheme() {
+        try {
+            const resp = await fetch('/api/theme');
+            if (!resp.ok) return;
+            _remoteThemeColors = await resp.json();
+            applyRemoteThemeColors();
+        } catch { /* fall back to CSS defaults silently */ }
     }
 
 
@@ -14425,6 +14455,7 @@
 
     hydrateStaticIcons();
     applyStoredTheme();
+    fetchAndApplyRemoteTheme();
     // Must run BEFORE attemptAutoLogin(): a valid stored session makes that function
     // synchronously hide #setup before its first await, which would leave this
     // generating against a 0x0 container (display:none) and produce nothing.
