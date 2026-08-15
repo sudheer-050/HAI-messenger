@@ -1327,6 +1327,11 @@
             justify-content: space-between;
             align-items: center;
             box-sizing: border-box;
+            /* z-index > 0 so the header-menu dropdown (position:absolute inside here)
+               paints above the sibling #messages element in the .chat-area stacking
+               context. Without this, DOM order puts #messages on top of the dropdown. */
+            position: relative;
+            z-index: 1;
         }
 
         .btn-clear-chat {
