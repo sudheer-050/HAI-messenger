@@ -11,6 +11,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const cookieParser = require('cookie-parser');
+const { rateLimit } = require('express-rate-limit');
 
 const app = express();
 app.use(express.json({ limit: '25mb' })); // encrypted email backups can be several MB base64-encoded
@@ -253,6 +254,36 @@ const SIGNUP_RATE_WINDOW = 60 * 10; // 10 minutes
 const LOGIN_RATE_LIMIT = 8;
 const LOGIN_RATE_WINDOW = 60 * 10;
 
+// IP-based rate limiters (complement the per-identity Redis limits above)
+const ipLimitSignup = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many signup attempts from this IP. Please try again later.' },
+});
+const ipLimitOtp = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many verification attempts from this IP. Please try again later.' },
+});
+const ipLimitLogin = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts from this IP. Please try again later.' },
+});
+const ipLimitForgotPassword = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many password reset attempts from this IP. Please try again later.' },
+});
+
 function signSessionToken(username) {
     return jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
 }
@@ -267,7 +298,7 @@ async function checkAndBumpRateLimit(key, limit, windowSeconds) {
     return count <= limit;
 }
 
-app.post('/api/auth/signup/start', async (req, res) => {
+app.post('/api/auth/signup/start', ipLimitSignup, async (req, res) => {
     const { firstName, lastName, email, password } = req.body || {};
     if (!firstName || !lastName || !email || !password) {
         return res.status(400).json({ error: 'All fields are required.' });
@@ -326,7 +357,7 @@ app.post('/api/auth/signup/start', async (req, res) => {
     }
 });
 
-app.post('/api/auth/signup/verify', async (req, res) => {
+app.post('/api/auth/signup/verify', ipLimitOtp, async (req, res) => {
     const { email, code } = req.body || {};
     if (!email || !code) {
         return res.status(400).json({ error: 'Email and code are required.' });
@@ -365,7 +396,7 @@ app.post('/api/auth/signup/verify', async (req, res) => {
     }
 });
 
-app.post('/api/auth/signup/complete', async (req, res) => {
+app.post('/api/auth/signup/complete', ipLimitSignup, async (req, res) => {
     const { email, username } = req.body || {};
     if (!email || !username) {
         return res.status(400).json({ error: 'Email and username are required.' });
@@ -409,7 +440,7 @@ app.post('/api/auth/signup/complete', async (req, res) => {
     }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', ipLimitLogin, async (req, res) => {
     const { identity, password } = req.body || {};
     if (!identity || !password) {
         return res.status(400).json({ error: 'Please enter your username/email and password.' });
@@ -463,7 +494,7 @@ function generateTemporaryPassword(length = 12) {
 // only the presence/absence of the email (and whatever the attacker infers from
 // response timing) could leak that, so the account lookup and email send both happen
 // unconditionally behind that same generic response.
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', ipLimitForgotPassword, async (req, res) => {
     const { identity } = req.body || {};
     if (!identity || typeof identity !== 'string') {
         return res.status(400).json({ error: 'Please enter your username or email.' });
