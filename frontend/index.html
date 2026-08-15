@@ -3,7 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-    <title>HAI</title>
+    <title>HAI Messenger — Free, End-to-End Encrypted Chat App</title>
+    <meta name="description" content="HAI Messenger is a free, self-hosted, end-to-end encrypted chat app. Real-time messaging, voice notes, photo and document sharing, mini-games, and anonymous Nearby chat — all private by design.">
+    <link rel="canonical" href="https://myhai.org/">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://myhai.org/">
+    <meta property="og:title" content="HAI Messenger — Free, End-to-End Encrypted Chat App">
+    <meta property="og:description" content="HAI Messenger is a free, self-hosted, end-to-end encrypted chat app. Real-time messaging, voice notes, photo and document sharing, mini-games, and anonymous Nearby chat — all private by design.">
+    <meta property="og:image" content="https://myhai.org/icons/og-image.png">
+    <meta property="og:site_name" content="HAI Messenger">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="HAI Messenger — Free, End-to-End Encrypted Chat App">
+    <meta name="twitter:description" content="HAI Messenger is a free, self-hosted, end-to-end encrypted chat app. Real-time messaging, voice notes, photo and document sharing, mini-games, and anonymous Nearby chat — all private by design.">
+    <meta name="twitter:image" content="https://myhai.org/icons/og-image.png">
+
+    <!-- JSON-LD structured data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "HAI Messenger",
+      "url": "https://myhai.org/",
+      "description": "A free, self-hosted, end-to-end encrypted chat app with real-time messaging, voice notes, photo and document sharing, mini-games, and anonymous Nearby chat.",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "Any",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
 
     <!-- PWA: install to home screen, run without browser chrome -->
     <link rel="manifest" href="/manifest.json">
@@ -3401,8 +3435,16 @@
 </head>
 <body>
 
+<!-- Crawler/no-JS fallback: describes the app for search engines and screen readers -->
+<noscript>
+  <main>
+    <h1>HAI Messenger</h1>
+    <p>HAI Messenger is a free, self-hosted, end-to-end encrypted chat app. Features include real-time messaging, voice notes, photo and document sharing, mini-games (Tic Tac Toe, Stone Paper Scissors, Truth or Dare), and anonymous Nearby chat — all private by design. Enable JavaScript to use the app.</p>
+  </main>
+</noscript>
+
 <div class="app-window" id="appMainContainer">
-    
+
     <!-- AUTHENTICATION CONTAINER -->
     <div id="setup">
         <div class="logo-watermark-layer" id="setupLogoWatermarkLayer"></div>
