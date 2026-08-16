@@ -1419,6 +1419,10 @@ const ANALYTICS_METRICS = {
     games_tictactoe: { label: 'Tic Tac Toe Started', eventTypes: ['game_tictactoe_started'], distinctUser: false },
     games_rps: { label: 'Rock-Paper-Scissors Started', eventTypes: ['game_rps_started'], distinctUser: false },
     games_truthdare: { label: 'Truth or Dare Started', eventTypes: ['game_truthdare_started'], distinctUser: false },
+    games_completed: { label: 'Games Completed (All)', eventTypes: ['game_tictactoe_completed', 'game_rps_completed', 'game_truthdare_completed'], distinctUser: false },
+    games_tictactoe_completed: { label: 'Tic Tac Toe Completed', eventTypes: ['game_tictactoe_completed'], distinctUser: false },
+    games_rps_completed: { label: 'Rock-Paper-Scissors Completed', eventTypes: ['game_rps_completed'], distinctUser: false },
+    games_truthdare_completed: { label: 'Truth or Dare Completed', eventTypes: ['game_truthdare_completed'], distinctUser: false },
     voice_notes_sent: { label: 'Voice Notes Sent', eventTypes: ['voice_note_sent'], distinctUser: false },
     photos_sent: { label: 'Photos Sent', eventTypes: ['photo_sent'], distinctUser: false },
     documents_sent: { label: 'Documents Sent', eventTypes: ['document_sent'], distinctUser: false },
@@ -1616,7 +1620,8 @@ app.get('/api/admin/feature-usage', requireAuth, requireAdmin, async (req, res) 
         const [gameRows, nearbyRow, mediaRows, sentRow, blockedRow] = await Promise.all([
             pgPool.query(
                 `SELECT event_type, COUNT(*) AS cnt FROM analytics_events
-                 WHERE event_type IN ('game_tictactoe_started','game_rps_started','game_truthdare_started')
+                 WHERE event_type IN ('game_tictactoe_started','game_rps_started','game_truthdare_started',
+                                      'game_tictactoe_completed','game_rps_completed','game_truthdare_completed')
                    AND created_at >= ${since} GROUP BY event_type`,
                 [String(days)]
             ),
@@ -1641,10 +1646,14 @@ app.get('/api/admin/feature-usage', requireAuth, requireAdmin, async (req, res) 
         ]);
 
         const gameCounts = { tictactoe: 0, rps: 0, truthdare: 0 };
+        const gameCompletedCounts = { tictactoe: 0, rps: 0, truthdare: 0 };
         gameRows.rows.forEach(r => {
             if (r.event_type === 'game_tictactoe_started') gameCounts.tictactoe = parseInt(r.cnt, 10);
             else if (r.event_type === 'game_rps_started') gameCounts.rps = parseInt(r.cnt, 10);
             else if (r.event_type === 'game_truthdare_started') gameCounts.truthdare = parseInt(r.cnt, 10);
+            else if (r.event_type === 'game_tictactoe_completed') gameCompletedCounts.tictactoe = parseInt(r.cnt, 10);
+            else if (r.event_type === 'game_rps_completed') gameCompletedCounts.rps = parseInt(r.cnt, 10);
+            else if (r.event_type === 'game_truthdare_completed') gameCompletedCounts.truthdare = parseInt(r.cnt, 10);
         });
 
         const mediaCounts = { voiceNotes: 0, photos: 0, documents: 0 };
@@ -1660,6 +1669,7 @@ app.get('/api/admin/feature-usage', requireAuth, requireAdmin, async (req, res) 
         res.json({
             period: `${days}d`,
             gamesStarted: { ...gameCounts, total: gameCounts.tictactoe + gameCounts.rps + gameCounts.truthdare },
+            gamesCompleted: { ...gameCompletedCounts, total: gameCompletedCounts.tictactoe + gameCompletedCounts.rps + gameCompletedCounts.truthdare },
             nearbyMatches: parseInt(nearbyRow.rows[0].count, 10),
             mediaShared: mediaCounts,
             messageDelivery: {
