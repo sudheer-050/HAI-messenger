@@ -2,7 +2,7 @@
     "name": "HAI",
     "short_name": "HAI",
     "description": "Zero-knowledge end-to-end encrypted chat",
-    "start_url": "/",
+    "start_url": "/index.html",
     "scope": "/",
     "display": "standalone",
     "orientation": "portrait",

@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>H AI — HAI Messenger</title>
+    <meta name="description" content="Talk to H, HAI Messenger's AI assistant — in text or voice.">
+    <link rel="icon" href="/icons/favicon-32.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-main: #09090b;
+            --bg-sidebar: #18181b;
+            --accent-brand: #9B8AFB;
+            --accent-brand-hover: #8171E8;
+            --text-normal: #fafafa;
+            --text-muted: #a1a1aa;
+            --border-color: #27272a;
+            --font-stack: 'Inter', system-ui, -apple-system, sans-serif;
+            --glass-blur: blur(20px) saturate(180%);
+            --glass-weak: rgba(255, 255, 255, 0.06);
+            --glass-strong: rgba(255, 255, 255, 0.09);
+            --glass-border: rgba(255, 255, 255, 0.12);
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; }
+        body {
+            font-family: var(--font-stack);
+            background: var(--bg-main);
+            color: var(--text-normal);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .header-left { display: flex; align-items: center; gap: 10px; }
+        .back-link {
+            display: flex; align-items: center; justify-content: center;
+            width: 36px; height: 36px; border-radius: 50%;
+            color: var(--text-muted); text-decoration: none; flex-shrink: 0;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .back-link:hover { background: var(--glass-weak); color: var(--text-normal); }
+        .header-avatar {
+            width: 32px; height: 32px; border-radius: 50%; background: var(--accent-brand);
+            display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0;
+        }
+        .header-left .name { font-weight: 700; font-size: 15px; }
+        .header-left .sub { font-size: 11.5px; color: var(--text-muted); }
+        .header-right { display: flex; justify-content: flex-end; }
+        .history-toggle-btn {
+            width: 36px; height: 36px; border-radius: 50%; border: none; background: transparent;
+            color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .history-toggle-btn:hover, .history-toggle-btn.active { background: var(--glass-weak); color: var(--accent-brand); }
+        .history-toggle-btn svg { width: 18px; height: 18px; }
+
+        /* MODE TOGGLE -- centered, morphing pill indicator slides between the two
+           labels instead of the background just flipping instantly. */
+        .mode-toggle {
+            position: relative;
+            display: flex;
+            background: var(--glass-weak);
+            border: 1px solid var(--glass-border);
+            border-radius: 999px;
+            padding: 3px;
+            width: 148px;
+        }
+        .mode-toggle-indicator {
+            position: absolute;
+            top: 3px; left: 3px;
+            width: calc(50% - 3px);
+            height: calc(100% - 6px);
+            background: var(--accent-brand);
+            border-radius: 999px;
+            transition: transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .mode-toggle.voice .mode-toggle-indicator { transform: translateX(calc(100% + 2px)); }
+        .mode-toggle button {
+            position: relative; z-index: 1; flex: 1; border: none; background: transparent;
+            color: var(--text-muted); font-family: var(--font-stack); font-size: 12.5px; font-weight: 600;
+            padding: 7px 0; border-radius: 999px; cursor: pointer; transition: color 0.2s ease;
+        }
+        .mode-toggle button.active { color: #fff; }
+
+        main { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+
+        /* ---- TEXT MODE ---- */
+        #textMode { flex: 1; display: flex; flex-direction: column; min-height: 0; max-width: 720px; width: 100%; margin: 0 auto; }
+        #textMessages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .msg { max-width: 78%; padding: 10px 15px; border-radius: 16px; font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+        .msg.user { align-self: flex-end; background: var(--accent-brand); color: #fff; border-bottom-right-radius: 4px; }
+        .msg.assistant { align-self: flex-start; background: var(--glass-weak); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
+        .msg.error { align-self: flex-start; background: rgba(218, 55, 60, 0.15); color: #f28b8e; border-bottom-left-radius: 4px; }
+        .typing-indicator { align-self: flex-start; display: flex; gap: 4px; padding: 12px 15px; background: var(--glass-weak); border: 1px solid var(--glass-border); border-radius: 16px; border-bottom-left-radius: 4px; }
+        .typing-indicator span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.2s ease-in-out infinite; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+        /* Teach-H clarification prompt, shown when she flags an unfamiliar term. */
+        .teach-card {
+            align-self: flex-start; max-width: 82%; background: rgba(155, 138, 251, 0.1);
+            border: 1px solid var(--accent-brand); border-radius: 16px; border-bottom-left-radius: 4px;
+            padding: 12px 15px; font-size: 13.5px; display: flex; flex-direction: column; gap: 8px;
+        }
+        .teach-card input {
+            border-radius: 10px; border: 1px solid var(--border-color); background: var(--glass-weak);
+            color: var(--text-normal); font-family: var(--font-stack); font-size: 13px; padding: 8px 10px; outline: none;
+        }
+        .teach-card input:focus { border-color: var(--accent-brand); }
+        .teach-card-actions { display: flex; gap: 8px; }
+        .teach-card button {
+            border: none; border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 600;
+            cursor: pointer; font-family: var(--font-stack);
+        }
+        .teach-card .teach-save { background: var(--accent-brand); color: #fff; }
+        .teach-card .teach-skip { background: var(--glass-weak); color: var(--text-muted); }
+
+        .input-row { display: flex; align-items: flex-end; gap: 10px; padding: 16px 20px 20px; }
+        #textInput {
+            flex: 1; resize: none; max-height: 140px; min-height: 44px;
+            padding: 12px 16px; border-radius: 16px; border: 1px solid var(--border-color);
+            background: var(--glass-weak); color: var(--text-normal);
+            font-family: var(--font-stack); font-size: 14.5px; line-height: 1.4; outline: none;
+        }
+        #textInput:focus { border-color: var(--accent-brand); }
+        #textSendBtn {
+            width: 44px; height: 44px; border-radius: 50%; border: none; flex-shrink: 0;
+            background: var(--accent-brand); color: #fff; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #textSendBtn:hover { background: var(--accent-brand-hover); }
+        #textSendBtn:disabled { opacity: 0.5; cursor: default; }
+        #textSendBtn svg { width: 17px; height: 17px; }
+
+        /* ---- VOICE MODE ---- */
+        #voiceMode { flex: 1; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 24px; }
+        .orb-wrap { width: 220px; height: 220px; border-radius: 50%; position: relative; }
+        #voiceCanvas { width: 100%; height: 100%; display: block; }
+        .voice-status { font-size: 15px; color: var(--text-muted); min-height: 20px; text-align: center; max-width: 480px; }
+        .voice-transcript { font-size: 17px; font-weight: 500; text-align: center; max-width: 560px; min-height: 26px; padding: 0 20px; }
+
+        /* HISTORY / TRANSCRIPT PANEL -- toggled by the header button, positioned
+           centered horizontally and low (near the bottom) per request, so it reads
+           as a drawer sliding up rather than a top-anchored modal. */
+        #historyPanel {
+            position: absolute;
+            left: 50%;
+            bottom: 16px;
+            transform: translate(-50%, 16px);
+            width: min(520px, calc(100vw - 32px));
+            max-height: min(60vh, 480px);
+            background: var(--bg-sidebar);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s ease;
+            z-index: 30;
+        }
+        #historyPanel.open { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+        .history-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 16px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        .history-header span { font-size: 13px; font-weight: 700; }
+        .history-header-actions { display: flex; gap: 6px; }
+        .history-icon-btn {
+            width: 30px; height: 30px; border-radius: 50%; border: none; background: transparent;
+            color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        .history-icon-btn:hover { background: var(--glass-weak); color: var(--text-normal); }
+        .history-icon-btn svg { width: 15px; height: 15px; }
+        #historyList { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+        #historyList .msg { max-width: 88%; font-size: 13px; }
+        #historyEmpty { font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px 0; }
+
+        @media (max-width: 640px) {
+            .header-left .sub { display: none; }
+            .orb-wrap { width: 180px; height: 180px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <a href="/" class="back-link" aria-label="Back to homepage" title="Back to homepage">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </a>
+            <div class="header-avatar">H</div>
+            <div>
+                <div class="name">H</div>
+                <div class="sub">HAI's assistant</div>
+            </div>
+        </div>
+
+        <div class="mode-toggle" id="modeToggle">
+            <div class="mode-toggle-indicator"></div>
+            <button type="button" id="textModeBtn" class="active">Text</button>
+            <button type="button" id="voiceModeBtn">Voice</button>
+        </div>
+
+        <div class="header-right">
+            <button type="button" class="history-toggle-btn" id="historyToggleBtn" aria-label="Show conversation history" title="History">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <div id="textMode">
+            <div id="textMessages">
+                <div class="msg assistant">Hi, I'm H. Ask me anything about HAI Messenger, or whatever's on your mind.</div>
+            </div>
+            <div class="input-row">
+                <textarea id="textInput" placeholder="Message H…" rows="1"></textarea>
+                <button id="textSendBtn" aria-label="Send">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div id="voiceMode">
+            <div class="orb-wrap"><canvas id="voiceCanvas" width="220" height="220"></canvas></div>
+            <div class="voice-transcript" id="voiceTranscript"></div>
+            <div class="voice-status" id="voiceStatus">Starting…</div>
+        </div>
+
+        <!-- HISTORY / TRANSCRIPT PANEL, positioned centered-bottom (see CSS) -->
+        <div id="historyPanel">
+            <div class="history-header">
+                <span>Conversation</span>
+                <div class="history-header-actions">
+                    <button type="button" class="history-icon-btn" id="downloadHistoryBtn" title="Download conversation">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button type="button" class="history-icon-btn" id="closeHistoryBtn" title="Close">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="historyList">
+                <div id="historyEmpty">No messages yet.</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        /* ============ LEARNING / GLOSSARY (private per-browser, localStorage) ============
+           When H flags a term she doesn't understand, the visitor can teach her its
+           meaning; it's remembered only in this browser and sent along as extra context
+           on future requests -- never shared with other visitors. */
+        const GLOSSARY_KEY = 'h_glossary_v1';
+        function loadGlossary() {
+            try { return JSON.parse(localStorage.getItem(GLOSSARY_KEY) || '[]'); } catch (e) { return []; }
+        }
+        function saveGlossaryTerm(term, meaning) {
+            const glossary = loadGlossary();
+            const existing = glossary.find(g => g.term.toLowerCase() === term.toLowerCase());
+            if (existing) existing.meaning = meaning;
+            else glossary.push({ term, meaning });
+            localStorage.setItem(GLOSSARY_KEY, JSON.stringify(glossary));
+        }
+        // H is asked (system prompt) to say exactly this phrase when a term
+        // is unfamiliar, so the frontend can reliably detect it and offer to learn.
+        const LEARN_PATTERN = /I'?m not sure what you mean by ['"]([^'"]+)['"]/i;
+
+        /* ============ SHARED: history + backend call ============ */
+        let hHistory = [];
+
+        function recordTranscript(role, text) {
+            hHistory.push({ role, content: text });
+            renderHistoryPanel();
+        }
+
+        async function askH(message) {
+            const res = await fetch('/api/h-chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, history: hHistory, glossary: loadGlossary() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+            return { reply: data.reply, emotion: data.emotion || 'neutral' };
+        }
+
+        /* ============ MODE SWITCHING ============ */
+        const modeToggle = document.getElementById('modeToggle');
+        const textModeBtn = document.getElementById('textModeBtn');
+        const voiceModeBtn = document.getElementById('voiceModeBtn');
+        const textModeEl = document.getElementById('textMode');
+        const voiceModeEl = document.getElementById('voiceMode');
+
+        function switchMode(mode) {
+            const toText = mode === 'text';
+            textModeEl.style.display = toText ? 'flex' : 'none';
+            voiceModeEl.style.display = toText ? 'none' : 'flex';
+            textModeBtn.classList.toggle('active', toText);
+            voiceModeBtn.classList.toggle('active', !toText);
+            modeToggle.classList.toggle('voice', !toText);
+            if (toText) {
+                stopVoiceConversation();
+            } else {
+                initVoiceOrb();
+                startVoiceConversation(); // auto-starts -- no separate mic button
+            }
+        }
+        // Mobile browsers (iOS Safari, many Android WebViews) only allow
+        // speechSynthesis.speak() to produce audio if the very first call in the
+        // page's lifetime happens synchronously inside a user gesture (a tap
+        // handler, not an async callback after it). H's actual replies are always
+        // spoken later, after an await'd fetch -- too late to count as "the
+        // gesture" -- so fire one silent, zero-volume utterance right here, still
+        // inside the tap, purely to unlock audio for every speak() call after it.
+        let speechUnlocked = false;
+        function unlockSpeechSynthesisForMobile() {
+            if (speechUnlocked) return;
+            speechUnlocked = true;
+            try {
+                const unlock = new SpeechSynthesisUtterance(' ');
+                unlock.volume = 0;
+                window.speechSynthesis.speak(unlock);
+            } catch (e) {}
+        }
+        textModeBtn.addEventListener('click', () => switchMode('text'));
+        voiceModeBtn.addEventListener('click', () => { unlockSpeechSynthesisForMobile(); switchMode('voice'); });
+
+        /* ============ TEXT MODE ============ */
+        const textMessages = document.getElementById('textMessages');
+        const textInput = document.getElementById('textInput');
+        const textSendBtn = document.getElementById('textSendBtn');
+        let textBusy = false;
+
+        function appendMsg(container, role, text) {
+            const el = document.createElement('div');
+            el.className = 'msg ' + role;
+            el.textContent = text;
+            container.appendChild(el);
+            container.scrollTop = container.scrollHeight;
+            return el;
+        }
+
+        // Shows H's reply, intercepting the "I'm not sure what you mean by X"
+        // pattern into an inline teach-H card instead of the raw sentence.
+        function presentReply(container, replyText, onTaught) {
+            const match = replyText.match(LEARN_PATTERN);
+            if (!match) {
+                appendMsg(container, 'assistant', replyText);
+                return;
+            }
+            const term = match[1];
+            appendMsg(container, 'assistant', replyText);
+            const card = document.createElement('div');
+            card.className = 'teach-card';
+            card.innerHTML = `
+                <span>Teach me what "${term.replace(/</g, '&lt;')}" means, and I'll remember it.</span>
+                <input type="text" placeholder="e.g. it means…" />
+                <div class="teach-card-actions">
+                    <button type="button" class="teach-save">Save</button>
+                    <button type="button" class="teach-skip">Skip</button>
+                </div>
+            `;
+            const input = card.querySelector('input');
+            card.querySelector('.teach-save').addEventListener('click', () => {
+                const meaning = input.value.trim();
+                if (meaning) { saveGlossaryTerm(term, meaning); if (onTaught) onTaught(term, meaning); }
+                card.remove();
+            });
+            card.querySelector('.teach-skip').addEventListener('click', () => card.remove());
+            container.appendChild(card);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function showTyping() {
+            const el = document.createElement('div');
+            el.className = 'typing-indicator';
+            el.id = 'typingIndicator';
+            el.innerHTML = '<span></span><span></span><span></span>';
+            textMessages.appendChild(el);
+            textMessages.scrollTop = textMessages.scrollHeight;
+        }
+        function hideTyping() {
+            const el = document.getElementById('typingIndicator');
+            if (el) el.remove();
+        }
+
+        textInput.addEventListener('input', () => {
+            textInput.style.height = 'auto';
+            textInput.style.height = Math.min(textInput.scrollHeight, 140) + 'px';
+        });
+        textInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTextMessage(); }
+        });
+        textSendBtn.addEventListener('click', sendTextMessage);
+
+        async function sendTextMessage() {
+            const text = textInput.value.trim();
+            if (!text || textBusy) return;
+            appendMsg(textMessages, 'user', text);
+            textInput.value = '';
+            textInput.style.height = 'auto';
+            textBusy = true;
+            textSendBtn.disabled = true;
+            showTyping();
+            try {
+                const { reply } = await askH(text);
+                hideTyping();
+                presentReply(textMessages, reply);
+                recordTranscript('user', text);
+                recordTranscript('assistant', reply);
+            } catch (err) {
+                hideTyping();
+                appendMsg(textMessages, 'error', err.message || "Couldn't reach H.");
+            } finally {
+                textBusy = false;
+                textSendBtn.disabled = false;
+            }
+        }
+
+        /* ============ VOICE MODE ============ */
+        const voiceStatus = document.getElementById('voiceStatus');
+        const voiceTranscript = document.getElementById('voiceTranscript');
+
+        let voiceConversationActive = false;
+        let voiceRecognition = null;
+        let isHSpeaking = false;
+        let orbSpeedMultiplier = 1;
+        let voiceTurnToken = 0; // guards against overlapping turns -- the fix for the double-voice bug
+
+        function setVoiceStatus(text) { voiceStatus.textContent = text; }
+
+        // Resolved ONCE and cached -- a single, consistent voice for the whole
+        // session, never re-picked mid-conversation.
+        let preferredVoiceCache = null;
+        let voicesReadyPromise = null;
+        // getVoices() returns [] until the browser finishes loading its voice list
+        // asynchronously; speaking before that resolves falls back to the OS default
+        // voice (often male on Windows) for just the first utterance, then the real
+        // pick kicks in from the second one on -- audibly a voice switch mid-conversation.
+        // Waiting here means the very first thing spoken already uses the locked-in voice.
+        function ensureVoicesLoaded() {
+            if (voicesReadyPromise) return voicesReadyPromise;
+            voicesReadyPromise = new Promise(resolve => {
+                const existing = window.speechSynthesis.getVoices();
+                if (existing.length) { resolve(existing); return; }
+                window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
+                setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
+            });
+            return voicesReadyPromise;
+        }
+
+        function getPreferredVoice(voices) {
+            if (preferredVoiceCache) return preferredVoiceCache;
+            if (!voices || !voices.length) return null;
+            // Use whatever the platform itself marks as its default TTS voice --
+            // this is literally Siri's voice on iOS Safari, or the native Google
+            // voice on Android Chrome, rather than us guessing at a specific named
+            // voice and risking a robotic-sounding pick.
+            const enVoices = voices.filter(v => /^en/i.test(v.lang));
+            const match = voices.find(v => v.default) || enVoices[0] || voices[0] || null;
+            preferredVoiceCache = match;
+            return preferredVoiceCache;
+        }
+
+        function stopSpeaking() {
+            window.speechSynthesis.cancel();
+        }
+
+        // Native speechSynthesis can't carry real tone, but pitch/rate is real
+        // and audible -- H's backend tags each reply with the emotion it's
+        // actually going for (see H_SYSTEM_PROMPT/H_EMOTIONS in server.js), and
+        // this maps that tag onto delivery so the same flat voice engine still
+        // sounds warmer for good news, softer for sad news, quicker when excited,
+        // instead of every reply landing at the identical flat pace.
+        const EMOTION_VOICE_PROFILES = {
+            happy:     { pitch: 1.12, rate: 1.05 },
+            excited:   { pitch: 1.22, rate: 1.14 },
+            calm:      { pitch: 0.94, rate: 0.92 },
+            curious:   { pitch: 1.08, rate: 0.98 },
+            concerned: { pitch: 0.92, rate: 0.90 },
+            sad:       { pitch: 0.86, rate: 0.86 },
+            neutral:   { pitch: 1,    rate: 1 },
+        };
+
+        function speak(text, onEnd, emotion) {
+            window.speechSynthesis.cancel();
+            const profile = EMOTION_VOICE_PROFILES[emotion] || EMOTION_VOICE_PROFILES.neutral;
+            ensureVoicesLoaded().then(voices => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                const voice = getPreferredVoice(voices);
+                if (voice) utterance.voice = voice;
+                utterance.pitch = profile.pitch;
+                utterance.rate = profile.rate;
+                let ended = false;
+                const finish = () => { if (ended) return; ended = true; onEnd(); };
+                utterance.onend = finish;
+                utterance.onerror = finish;
+                window.speechSynthesis.speak(utterance);
+            });
+        }
+
+        function stopAnyRecognition() {
+            if (voiceRecognition) {
+                try { voiceRecognition.onresult = null; voiceRecognition.onerror = null; voiceRecognition.onend = null; voiceRecognition.abort(); } catch (e) {}
+                voiceRecognition = null;
+            }
+        }
+
+        function startVoiceListenCycle() {
+            if (!voiceConversationActive || isHSpeaking) return;
+            stopAnyRecognition(); // never let two recognition instances run at once
+            const myToken = ++voiceTurnToken;
+            const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognitionCtor) {
+                setVoiceStatus('Voice input needs Chrome, Edge, or another Web Speech-capable browser.');
+                stopVoiceConversation();
+                return;
+            }
+            const recognition = new SpeechRecognitionCtor();
+            recognition.lang = document.documentElement.lang || 'en-US';
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 1;
+            voiceRecognition = recognition;
+            orbSpeedMultiplier = 1.6;
+            setVoiceStatus('Listening…');
+            voiceTranscript.textContent = '';
+
+            let finalTranscript = '';
+            recognition.onresult = (e) => {
+                if (myToken !== voiceTurnToken) return;
+                let interim = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
+                    else interim += e.results[i][0].transcript;
+                }
+                voiceTranscript.textContent = finalTranscript + interim;
+            };
+            recognition.onerror = () => { if (myToken === voiceTurnToken) voiceRecognition = null; };
+            recognition.onend = () => {
+                if (myToken !== voiceTurnToken) return; // superseded by a newer cycle -- ignore
+                voiceRecognition = null;
+                orbSpeedMultiplier = 1;
+                if (!voiceConversationActive) return;
+                const text = finalTranscript.trim();
+                if (text) handleVoiceTurn(text, myToken);
+                else startVoiceListenCycle(); // silence, nothing said -- keep listening
+            };
+            try { recognition.start(); } catch (e) { voiceRecognition = null; }
+        }
+
+        async function handleVoiceTurn(text, myToken) {
+            setVoiceStatus('H is thinking…');
+            try {
+                const { reply, emotion } = await askH(text);
+                if (myToken !== voiceTurnToken || !voiceConversationActive) return; // a newer turn superseded this one
+                recordTranscript('user', text);
+                recordTranscript('assistant', reply);
+
+                const match = reply.match(LEARN_PATTERN);
+                const spokenText = match ? reply : reply; // speak the full sentence either way, it reads naturally aloud
+                voiceTranscript.textContent = reply;
+                setVoiceStatus('H is speaking…');
+                isHSpeaking = true;
+                orbSpeedMultiplier = 2;
+                speak(spokenText, () => {
+                    isHSpeaking = false;
+                    orbSpeedMultiplier = 1;
+                    if (myToken !== voiceTurnToken || !voiceConversationActive) return;
+                    if (match) {
+                        setVoiceStatus('Switch to Text mode to teach H that word, or just keep talking.');
+                    }
+                    voiceTranscript.textContent = '';
+                    startVoiceListenCycle();
+                }, emotion);
+            } catch (err) {
+                if (myToken !== voiceTurnToken || !voiceConversationActive) return;
+                setVoiceStatus("Couldn't reach H -- trying again shortly.");
+                setTimeout(() => { if (voiceConversationActive) startVoiceListenCycle(); }, 2000);
+            }
+        }
+
+        function startVoiceConversation() {
+            voiceConversationActive = true;
+            startVoiceListenCycle();
+        }
+        function stopVoiceConversation() {
+            voiceConversationActive = false;
+            isHSpeaking = false;
+            orbSpeedMultiplier = 1;
+            voiceTurnToken++; // invalidate any in-flight cycle/turn
+            stopAnyRecognition();
+            stopSpeaking();
+            setVoiceStatus('Starting…');
+            voiceTranscript.textContent = '';
+        }
+
+        /* ============ HISTORY / TRANSCRIPT PANEL ============ */
+        const historyPanel = document.getElementById('historyPanel');
+        const historyToggleBtn = document.getElementById('historyToggleBtn');
+        const historyList = document.getElementById('historyList');
+        const closeHistoryBtn = document.getElementById('closeHistoryBtn');
+        const downloadHistoryBtn = document.getElementById('downloadHistoryBtn');
+
+        function renderHistoryPanel() {
+            if (!hHistory.length) {
+                historyList.innerHTML = '<div id="historyEmpty">No messages yet.</div>';
+                return;
+            }
+            historyList.innerHTML = '';
+            hHistory.forEach(m => appendMsg(historyList, m.role === 'user' ? 'user' : 'assistant', m.content));
+        }
+        historyToggleBtn.addEventListener('click', () => {
+            const willOpen = !historyPanel.classList.contains('open');
+            historyPanel.classList.toggle('open', willOpen);
+            historyToggleBtn.classList.toggle('active', willOpen);
+            if (willOpen) renderHistoryPanel();
+        });
+        closeHistoryBtn.addEventListener('click', () => {
+            historyPanel.classList.remove('open');
+            historyToggleBtn.classList.remove('active');
+        });
+        downloadHistoryBtn.addEventListener('click', () => {
+            const lines = hHistory.map(m => `${m.role === 'user' ? 'You' : 'H'}: ${m.content}`);
+            const blob = new Blob([lines.join('\n\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'h-conversation.txt';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        });
+
+        /* ---- Siri-wave shader as the voice-mode orb (same GLSL as the main app's
+           voice button). Speed doubles while listening/speaking. ---- */
+        const ORB_VERTEX_SHADER = `attribute vec2 aPos; void main(){ gl_Position=vec4(aPos,0.0,1.0); }`;
+        const ORB_FRAGMENT_SHADER = `precision highp float;
+uniform vec2 iResolution; uniform float iTime;
+const float PI = 3.14159265359;
+const float AMPLITUDE   = 0.32;
+const float FREQ        = 1.1;
+const float ABER_FREQ   = 1.0;
+const float SPEED       = 2.4;
+const float WAVE_SCALE  = 0.6;
+const float ABERRATION  = 2.6;
+const float THICKNESS   = 3.0;
+const float INTENSITY   = 2.;
+const float FALLOFF     = 1.7;
+const float EDGE_MASK   = 0.4;
+const float EDGE_INSET  = 0.0;
+const float BAND_FILL   = 30000.0;
+const float BAND_THICK  = 0.08;
+const float SOFTNESS    = 2.5;
+const float LOW_AMP     = 6.0;
+const float LOW_INT     = 1.5;
+const float MID_ABER    = 0.8;
+const float MID_ABAMP   = 0.05;
+const float MID_BAND    = 20.0;
+const float MID_SOFT    = 0.4;
+const float HIGH_ABER   = 0.5;
+const float HIGH_ABAMP  = 0.06;
+const float RESOLVED    = 1.0;
+const float UNRES_SCALE = 0.14;
+
+vec3 spectral4(int s){
+    float x = float(s);
+    return clamp(vec3(abs(x-3.0)-1.0, 2.0-abs(x-2.0), 2.0-abs(x-4.0)), 0.0, 1.0);
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord){
+    vec2 R = iResolution.xy;
+    float aspect = R.x / R.y;
+    vec2 p = (fragCoord + 0.5) * 2.0 / R - 1.0;
+    p.x *= aspect;
+    float yScreen = p.y;
+    p /= max(WAVE_SCALE, 0.1);
+
+    float t   = iTime;
+    float low  = clamp(0.45 + 0.45*sin(t*0.8)*sin(t*0.37+1.0), 0.0, 1.0);
+    float mid  = clamp(0.40 + 0.40*sin(t*1.7+2.0)*sin(t*0.53), 0.0, 1.0);
+    float high = clamp(0.30 + 0.30*sin(t*2.9+4.0)*sin(t*0.71+2.0), 0.0, 1.0);
+
+    float res   = clamp(RESOLVED, 0.0, 1.0);
+    float drift = mod(t, 20.0*PI) * SPEED;
+
+    float xN  = p.x / max(aspect, 1.0);
+    float env = cos(PI*0.5 * min(abs(0.9*xN), 1.0));
+    env *= env;
+
+    float A1    = AMPLITUDE + 0.01*low*LOW_AMP;
+    float A2    = A1 + mid*MID_ABAMP + high*HIGH_ABAMP;
+    float AB    = (ABERRATION + mid*MID_ABER + high*HIGH_ABER)*res;
+    float th    = mix(0.1, 0.01*THICKNESS, res);
+    float inten = mix(0.1, 0.01*(INTENSITY + low*LOW_INT), res);
+    float soft  = 0.01*res*max(0.0, SOFTNESS + mid*MID_SOFT);
+
+    float dUnres = max(length(p) - mix(0.14, UNRES_SCALE, res), 0.0);
+    float yMain = A1 * env * res * sin(p.x*FREQ + drift);
+
+    float bandFillTh = max(BAND_THICK, 1e-4);
+    float bandAmt    = 1e-4 * BAND_FILL * inten;
+    vec3 num = vec3(0.0), den = vec3(0.0);
+    for(int s = 0; s < 4; s++){
+        vec3 hue = mix(vec3(1.0), spectral4(s), res);
+        den += hue;
+        float ab = mix(-AB, AB, float(s)/3.0);
+        float yL = A2 * env * res * sin(p.x*ABER_FREQ + drift + ab);
+        float d   = mix(dUnres, abs(p.y - yL), res);
+        float lor = mix(1.0/(1.0 + (0.02*d)*(0.02*d)), 1.0, res);
+        float line = inten / (sqrt(d*d + soft*soft) + th);
+        float lo = min(yMain, yL), hi = max(yMain, yL);
+        float dBand = max(0.0, max(p.y - hi, lo - p.y));
+        float band  = bandAmt / (dBand + bandFillTh);
+        num += hue * lor * (line + band);
+    }
+    vec3 col = num / den;
+
+    float dM    = mix(dUnres, abs(p.y - yMain), res);
+    float lorM  = mix(1.0/(1.0 + (0.02*dM)*(0.02*dM)), 1.0, res);
+    float boost = (1.0 - res) * (14.0*low + 4.0);
+    col += 0.5 * inten * (lorM + boost) / (sqrt(dM*dM + soft*soft) + th);
+
+    col = pow(max(col, 0.0), vec3(1.5));
+    float emT = clamp((abs(yScreen) - 1.0 + EDGE_INSET) / (-max(EDGE_MASK, 1e-4)), 0.0, 1.0);
+    float em  = emT*emT*(3.0 - 2.0*emT);
+    float gauss = exp(-pow(xN*FALLOFF, 2.0));
+    col *= mix(1.0, em*gauss, res);
+    col *= res;
+    fragColor = vec4(col, 1.0);
+}
+void main(){
+    vec4 c;
+    mainImage(c, gl_FragCoord.xy);
+    float alpha = clamp(max(max(c.r, c.g), c.b), 0.0, 1.0);
+    gl_FragColor = vec4(c.rgb, alpha);
+}`;
+
+        let orbInitialized = false;
+        function initVoiceOrb() {
+            if (orbInitialized) return;
+            orbInitialized = true;
+            const canvas = document.getElementById('voiceCanvas');
+            const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false });
+            if (!gl) return;
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            function compile(type, src) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, src);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error('orb shader compile error:', gl.getShaderInfoLog(shader));
+                    return null;
+                }
+                return shader;
+            }
+            const vs = compile(gl.VERTEX_SHADER, ORB_VERTEX_SHADER);
+            const fs = compile(gl.FRAGMENT_SHADER, ORB_FRAGMENT_SHADER);
+            if (!vs || !fs) return;
+            const program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            gl.useProgram(program);
+
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+            const aPos = gl.getAttribLocation(program, 'aPos');
+            gl.enableVertexAttribArray(aPos);
+            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+            const uResolution = gl.getUniformLocation(program, 'iResolution');
+            const uTime = gl.getUniformLocation(program, 'iTime');
+            const dim = canvas.width;
+            gl.viewport(0, 0, dim, dim);
+
+            let lastFrameAt = performance.now();
+            let shaderTime = 0;
+            function frame() {
+                const now = performance.now();
+                const dt = (now - lastFrameAt) / 1000;
+                lastFrameAt = now;
+                shaderTime += dt * orbSpeedMultiplier;
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                gl.uniform2f(uResolution, dim, dim);
+                gl.uniform1f(uTime, shaderTime);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+                requestAnimationFrame(frame);
+            }
+            frame();
+        }
+    </script>
+</body>
+</html>

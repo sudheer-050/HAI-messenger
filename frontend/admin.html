@@ -7,34 +7,30 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Color+Emoji&display=swap" rel="stylesheet">
-<script>
-    // Applied before first paint so there's no light-mode flash for a dark-mode admin.
-    document.documentElement.setAttribute('data-theme', localStorage.getItem('hai_theme') || 'light');
-</script>
 <style>
     :root {
-        --bg-main: #f4f6f8;
-        --bg-card: #ffffff;
-        --bg-sidebar: #ffffff;
-        --border: #e3e7eb;
-        --text-normal: #1c2430;
-        --text-muted: #6b7684;
-        --accent: #4a9ad9;
-        --accent-dim: rgba(74, 154, 217, 0.12);
-        --accent-red: #da373c;
-        --accent-green: #23a55a;
-        --shadow: 0 1px 3px rgba(20, 30, 40, 0.06), 0 1px 2px rgba(20, 30, 40, 0.04);
-    }
-    :root[data-theme="dark"] {
-        --bg-main: #14181d;
-        --bg-card: #1c2229;
-        --bg-sidebar: #191e24;
-        --border: #2a323b;
-        --text-normal: #eef1f4;
-        --text-muted: #8b96a3;
-        --accent: #5ba8e6;
-        --accent-dim: rgba(91, 168, 230, 0.14);
-        --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        /* Same black system as the rest of the product (index.html/landing.html/
+           h.html) -- no light mode, matching the site-wide black-only decision. */
+        --bg-main: #09090b;
+        --bg-card: #0d0d10;
+        --bg-sidebar: #0d0d10;
+        --border: #1f1f23;
+        --text-normal: #fafafa;
+        --text-muted: #a1a1aa;
+        --accent: #9B8AFB;
+        --accent-hover: #8171E8;
+        --accent-dim: rgba(155, 138, 251, 0.14);
+        --accent-red: #e66767;
+        --accent-green: #199e70;
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+        /* Chart-specific tokens (dataviz skill) -- gridlines/axis recessive against
+           the card surface, distinct from --border which is used for UI chrome. */
+        --chart-grid: #1a1a1e;
+        --chart-axis: #2c2c31;
+        /* Validated categorical palette (dark column), CVD- and contrast-checked
+           against this exact surface (#09090b) via the dataviz skill's validator. */
+        --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+        --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
     }
     * { box-sizing: border-box; }
     body {
@@ -88,6 +84,51 @@
     .overview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
     .overview-card .value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
     .overview-card .label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* INSIGHTS -- Growth / Feature Usage / Retention */
+    .insights-section { margin-bottom: 28px; display: flex; flex-direction: column; gap: 18px; }
+    .insights-row-split { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; align-items: start; }
+    @media (max-width: 900px) { .insights-row-split { grid-template-columns: 1fr; } }
+    .insights-card-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+    .insights-card-header h3 { margin: 0; font-size: 14px; font-weight: 700; }
+    .insights-subtitle { font-size: 11.5px; color: var(--text-muted); }
+
+    .stat-tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+    .stat-tile-grid-compact { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 10px; }
+    .stat-tile {
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+        padding: 12px 14px; box-shadow: var(--shadow);
+    }
+    .stat-tile .stat-value { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .stat-tile .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .stat-tile.accent .stat-value { color: var(--accent); }
+    .stat-tile.status-good .stat-value { color: #59d68c; }
+    .stat-tile.status-critical .stat-value { color: var(--accent-red); }
+
+    .chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+    .chart-canvas-wrap { position: relative; height: 200px; }
+    .chart-canvas-wrap canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .chart-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); }
+    .chart-legend-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    .chart-tooltip {
+        position: absolute; pointer-events: none; background: var(--bg-sidebar); border: 1px solid var(--border);
+        border-radius: 8px; padding: 6px 10px; font-size: 11.5px; box-shadow: var(--shadow); white-space: nowrap;
+        transform: translate(-50%, -110%); opacity: 0; transition: opacity 0.1s ease; z-index: 5;
+    }
+    .chart-tooltip.visible { opacity: 1; }
+    .chart-tooltip .tt-label { color: var(--text-muted); }
+    .chart-tooltip .tt-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .retention-table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 6px 14px; box-shadow: var(--shadow); overflow-x: auto; }
+    .retention-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .retention-table th { text-align: left; font-weight: 600; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+    .retention-table td { padding: 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+    .retention-table tr:last-child td { border-bottom: none; }
+    .retention-cell { display: flex; align-items: center; gap: 6px; }
+    .retention-bar-track { width: 46px; height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; flex-shrink: 0; }
+    .retention-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+    .retention-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
     /* DASHBOARD HEADER */
     .dashboard-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -180,7 +221,7 @@
 <div id="gateScreen" class="gate-screen" style="display:none;">
     <h2 id="gateTitle">Checking access…</h2>
     <p id="gateMessage"></p>
-    <a class="btn primary" href="/" style="text-decoration:none; margin-top:8px;">Back to Chat</a>
+    <a class="btn primary" href="/index.html" style="text-decoration:none; margin-top:8px;">Back to Chat</a>
 </div>
 
 <div id="appShell" style="display:none; flex-direction: column; height: 100%;">
@@ -191,7 +232,7 @@
         </div>
         <div class="topbar-right">
             <span id="topbarUsername" style="font-size:13px; color: var(--text-muted);"></span>
-            <a class="btn" href="/" style="text-decoration:none;">💬 Chat Mode</a>
+            <a class="btn" href="/index.html" style="text-decoration:none;">💬 Chat Mode</a>
         </div>
     </div>
 
@@ -209,6 +250,38 @@
 
         <div class="main">
             <div class="overview-grid" id="overviewGrid"></div>
+
+            <!-- GROWTH & FEATURE USAGE -- curated insights, always visible above the
+                 user-built dashboards below, powered by /api/admin/growth,
+                 /api/admin/feature-usage, /api/admin/retention. -->
+            <div class="insights-section">
+                <div class="insights-row">
+                    <div class="insights-col">
+                        <div class="insights-card-header">
+                            <h3>Growth &amp; Engagement</h3>
+                            <span class="insights-subtitle" id="growthDefinition"></span>
+                        </div>
+                        <div class="stat-tile-grid" id="growthTiles"></div>
+                    </div>
+                </div>
+
+                <div class="insights-row insights-row-split">
+                    <div class="insights-col">
+                        <div class="insights-card-header"><h3>Feature Usage <span class="insights-subtitle">last 30 days</span></h3></div>
+                        <div class="chart-card">
+                            <div class="chart-canvas-wrap" id="featureUsageChartWrap"><canvas id="featureUsageCanvas"></canvas></div>
+                            <div class="chart-legend" id="featureUsageLegend"></div>
+                        </div>
+                        <div class="stat-tile-grid stat-tile-grid-compact" id="deliveryTiles"></div>
+                    </div>
+                    <div class="insights-col">
+                        <div class="insights-card-header"><h3>Retention <span class="insights-subtitle">by signup cohort</span></h3></div>
+                        <div class="retention-table-wrap">
+                            <table class="retention-table" id="retentionTable"></table>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="dashboard-header">
                 <h2 id="activeDashboardName">Dashboard</h2>
@@ -396,6 +469,10 @@
         await loadOverview();
         setInterval(loadOverview, 30000);
 
+        loadGrowth();
+        loadFeatureUsage();
+        loadRetention();
+
         await loadDashboards();
     }
 
@@ -415,6 +492,191 @@
                 `<div class="overview-card"><div class="value">${c.value.toLocaleString()}</div><div class="label">${c.label}</div></div>`
             ).join('');
         } catch (err) { console.error('overview load failed:', err.message); }
+    }
+
+    /* GROWTH & ENGAGEMENT */
+    async function loadGrowth() {
+        try {
+            const g = await authFetchJSON('/api/admin/growth', 'GET');
+            document.getElementById('growthDefinition').textContent = 'Active = ' + g.activeDefinition.toLowerCase();
+            const tiles = [
+                { label: 'DAU', value: g.dau, cls: 'accent' },
+                { label: 'WAU', value: g.wau, cls: 'accent' },
+                { label: 'MAU', value: g.mau, cls: 'accent' },
+                { label: 'Signups Today', value: g.signupsToday },
+                { label: 'Signups (7d)', value: g.signups7d },
+                { label: 'Signups (30d)', value: g.signups30d },
+            ];
+            document.getElementById('growthTiles').innerHTML = tiles.map(t => `
+                <div class="stat-tile ${t.cls || ''}">
+                    <div class="stat-value">${t.value.toLocaleString()}</div>
+                    <div class="stat-label">${t.label}</div>
+                </div>`).join('');
+        } catch (err) {
+            console.error('growth load failed:', err.message);
+        }
+    }
+
+    /* FEATURE USAGE -- categorical bar chart (validated palette) + delivery health tiles */
+    let featureUsageData = null;
+    async function loadFeatureUsage() {
+        try {
+            const f = await authFetchJSON('/api/admin/feature-usage?days=30', 'GET');
+            featureUsageData = f;
+            renderFeatureUsageChart();
+
+            const blockRatePct = (f.messageDelivery.blockRate * 100).toFixed(1);
+            const tiles = [
+                { label: 'Messages Sent', value: f.messageDelivery.sent, cls: 'status-good' },
+                { label: 'Messages Blocked', value: f.messageDelivery.blocked, cls: f.messageDelivery.blocked > 0 ? 'status-critical' : '' },
+                { label: 'Block Rate', value: blockRatePct + '%', cls: '' },
+            ];
+            document.getElementById('deliveryTiles').innerHTML = tiles.map(t => `
+                <div class="stat-tile ${t.cls}">
+                    <div class="stat-value">${typeof t.value === 'number' ? t.value.toLocaleString() : t.value}</div>
+                    <div class="stat-label">${t.label}</div>
+                </div>`).join('');
+        } catch (err) {
+            console.error('feature-usage load failed:', err.message);
+        }
+    }
+
+    function renderFeatureUsageChart() {
+        if (!featureUsageData) return;
+        const f = featureUsageData;
+        const categories = [
+            { label: 'Tic Tac Toe', value: f.gamesStarted.tictactoe, color: 'var(--series-1)' },
+            { label: 'Rock Paper Scissors', value: f.gamesStarted.rps, color: 'var(--series-2)' },
+            { label: 'Truth or Dare', value: f.gamesStarted.truthdare, color: 'var(--series-3)' },
+            { label: 'Nearby Matches', value: f.nearbyMatches, color: 'var(--series-4)' },
+            { label: 'Voice Notes', value: f.mediaShared.voiceNotes, color: 'var(--series-5)' },
+            { label: 'Photos', value: f.mediaShared.photos, color: 'var(--series-6)' },
+            { label: 'Documents', value: f.mediaShared.documents, color: 'var(--series-7)' },
+        ];
+        const canvas = document.getElementById('featureUsageCanvas');
+        drawCategoricalBarChart(canvas, categories);
+        document.getElementById('featureUsageLegend').innerHTML = categories.map(c => `
+            <span class="chart-legend-item"><span class="chart-legend-swatch" style="background:${c.color}"></span>${c.label} (${c.value.toLocaleString()})</span>
+        `).join('');
+    }
+
+    /* RETENTION -- cohort table with inline percentage bars */
+    async function loadRetention() {
+        try {
+            const r = await authFetchJSON('/api/admin/retention?days=30', 'GET');
+            const table = document.getElementById('retentionTable');
+            const cohorts = r.cohorts.filter(c => c.signups > 0).slice(-8).reverse();
+            if (!cohorts.length) {
+                table.innerHTML = '';
+                table.parentElement.innerHTML = '<div class="retention-empty">No signup cohorts with data yet.</div>';
+                return;
+            }
+            const pctCell = (n, total) => {
+                const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+                return `<td><div class="retention-cell"><div class="retention-bar-track"><div class="retention-bar-fill" style="width:${pct}%"></div></div><span>${pct}%</span></div></td>`;
+            };
+            table.innerHTML = `
+                <thead><tr><th>Cohort</th><th>Signups</th><th>D1</th><th>D7</th><th>D30</th></tr></thead>
+                <tbody>
+                    ${cohorts.map(c => `
+                        <tr>
+                            <td>${c.date}</td>
+                            <td>${c.signups}</td>
+                            ${pctCell(c.d1, c.signups)}
+                            ${pctCell(c.d7, c.signups)}
+                            ${pctCell(c.d30, c.signups)}
+                        </tr>
+                    `).join('')}
+                </tbody>`;
+        } catch (err) {
+            console.error('retention load failed:', err.message);
+        }
+    }
+
+    /* CATEGORICAL BAR CHART -- used by Feature Usage. Rounded data-ends, recessive
+       gridlines, hover tooltip (dataviz skill marks + interaction requirements). */
+    function drawCategoricalBarChart(canvas, categories) {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const w = rect.width, h = rect.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const styles = getComputedStyle(document.documentElement);
+        const gridColor = styles.getPropertyValue('--chart-grid').trim();
+        const mutedColor = styles.getPropertyValue('--text-muted').trim();
+
+        const values = categories.map(c => c.value);
+        const max = Math.max(1, ...values);
+        const padding = { top: 10, right: 10, bottom: 8, left: 10 };
+        const chartW = w - padding.left - padding.right;
+        const chartH = h - padding.top - padding.bottom;
+
+        // Recessive gridlines
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 3; i++) {
+            const y = padding.top + chartH * (i / 3);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + chartW, y); ctx.stroke();
+        }
+
+        const gap = chartW / categories.length;
+        const barWidth = Math.max(6, gap * 0.5);
+        const bars = [];
+        categories.forEach((c, i) => {
+            const barH = Math.max(2, (c.value / max) * chartH);
+            const x = padding.left + i * gap + (gap - barWidth) / 2;
+            const y = padding.top + chartH - barH;
+            // Rounded data-end (top corners only), 4px radius per marks spec.
+            const radius = Math.min(4, barWidth / 2, barH);
+            ctx.fillStyle = c.color.startsWith('var(') ? styles.getPropertyValue(c.color.slice(4, -1)).trim() : c.color;
+            ctx.beginPath();
+            ctx.moveTo(x, y + radius);
+            ctx.arcTo(x, y, x + radius, y, radius);
+            ctx.arcTo(x + barWidth, y, x + barWidth, y + radius, radius);
+            ctx.lineTo(x + barWidth, y + barH);
+            ctx.lineTo(x, y + barH);
+            ctx.closePath();
+            ctx.fill();
+            bars.push({ x, y, width: barWidth, height: barH, label: c.label, value: c.value });
+        });
+
+        attachBarHoverTooltip(canvas, bars, padding, chartH);
+    }
+
+    let chartHoverHandlers = new WeakMap();
+    function attachBarHoverTooltip(canvas, bars, padding, chartH) {
+        // Replace any previously-attached listener for this canvas (re-render on data refresh).
+        const prev = chartHoverHandlers.get(canvas);
+        if (prev) canvas.removeEventListener('mousemove', prev.move), canvas.removeEventListener('mouseleave', prev.leave);
+
+        let tooltip = canvas.parentElement.querySelector('.chart-tooltip');
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.className = 'chart-tooltip';
+            canvas.parentElement.appendChild(tooltip);
+        }
+
+        const move = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const hit = bars.find(b => mx >= b.x && mx <= b.x + b.width && my >= padding.top && my <= padding.top + chartH);
+            if (hit) {
+                tooltip.innerHTML = `<span class="tt-label">${hit.label}:</span> <span class="tt-value">${hit.value.toLocaleString()}</span>`;
+                tooltip.style.left = (hit.x + hit.width / 2) + 'px';
+                tooltip.style.top = hit.y + 'px';
+                tooltip.classList.add('visible');
+            } else {
+                tooltip.classList.remove('visible');
+            }
+        };
+        const leave = () => tooltip.classList.remove('visible');
+        canvas.addEventListener('mousemove', move);
+        canvas.addEventListener('mouseleave', leave);
+        chartHoverHandlers.set(canvas, { move, leave });
     }
 
     /* DASHBOARDS */
@@ -572,7 +834,9 @@
     }
 
     /* LIGHTWEIGHT CANVAS CHARTS — no external chart library, consistent with the
-       rest of this self-hosted app not depending on any CDN. */
+       rest of this self-hosted app not depending on any CDN. Marks follow the
+       dataviz skill: 2px lines, rounded data-ends, recessive gridlines, and a
+       hover layer (crosshair+tooltip on line, per-bar tooltip on bar). */
     function drawChart(canvas, series, type) {
         const rect = canvas.parentElement.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
@@ -584,9 +848,9 @@
         ctx.clearRect(0, 0, w, h);
 
         const styles = getComputedStyle(document.documentElement);
-        const accent = styles.getPropertyValue('--accent').trim() || '#4a9ad9';
-        const gridColor = styles.getPropertyValue('--border').trim() || '#e2e2e2';
-        const mutedColor = styles.getPropertyValue('--text-muted').trim() || '#888';
+        const accent = styles.getPropertyValue('--accent').trim() || '#9B8AFB';
+        const gridColor = styles.getPropertyValue('--chart-grid').trim() || '#1a1a1e';
+        const mutedColor = styles.getPropertyValue('--text-muted').trim() || '#a1a1aa';
 
         const values = series.map(p => p.value);
         const max = Math.max(1, ...values);
@@ -601,24 +865,38 @@
             ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + chartW, y); ctx.stroke();
         }
 
+        const points = []; // hit-test targets for hover, shared shape for line/bar
+
         if (type === 'bar') {
             const gap = chartW / values.length;
-            const barWidth = Math.max(2, gap * 0.6);
+            const barWidth = Math.max(3, gap * 0.6);
             ctx.fillStyle = accent;
             values.forEach((v, i) => {
-                const barH = (v / max) * chartH;
+                const barH = Math.max(1, (v / max) * chartH);
                 const x = padding.left + i * gap + (gap - barWidth) / 2;
                 const y = padding.top + chartH - barH;
-                ctx.fillRect(x, y, barWidth, Math.max(barH, 1));
+                const radius = Math.min(4, barWidth / 2, barH);
+                ctx.beginPath();
+                ctx.moveTo(x, y + radius);
+                ctx.arcTo(x, y, x + radius, y, radius);
+                ctx.arcTo(x + barWidth, y, x + barWidth, y + radius, radius);
+                ctx.lineTo(x + barWidth, y + barH);
+                ctx.lineTo(x, y + barH);
+                ctx.closePath();
+                ctx.fill();
+                points.push({ x: x + barWidth / 2, y, width: barWidth, top: y, date: series[i].date, value: v });
             });
         } else {
             ctx.strokeStyle = accent;
             ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
             ctx.beginPath();
             values.forEach((v, i) => {
                 const x = padding.left + (i / (values.length - 1 || 1)) * chartW;
                 const y = padding.top + chartH - (v / max) * chartH;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                points.push({ x, y, date: series[i].date, value: v });
             });
             ctx.stroke();
 
@@ -628,9 +906,10 @@
             ctx.fillStyle = accent + '22';
             ctx.fill();
 
-            const lastY = padding.top + chartH - (values[values.length - 1] / max) * chartH;
+            // Rounded data-end on the last point, anchored to the line (marks spec).
+            const last = points[points.length - 1];
             ctx.fillStyle = accent;
-            ctx.beginPath(); ctx.arc(padding.left + chartW, lastY, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(last.x, last.y, 3, 0, Math.PI * 2); ctx.fill();
         }
 
         ctx.fillStyle = mutedColor;
@@ -639,6 +918,66 @@
         ctx.fillText(series[0].date.slice(5), padding.left, h - 4);
         ctx.textAlign = 'right';
         ctx.fillText(series[series.length - 1].date.slice(5), padding.left + chartW, h - 4);
+
+        attachSeriesHoverTooltip(canvas, points, type, padding, chartH, accent);
+    }
+
+    /* Hover layer for line (crosshair, snap-to-nearest-x) and bar (direct hit) charts. */
+    function attachSeriesHoverTooltip(canvas, points, type, padding, chartH, accent) {
+        const prev = chartHoverHandlers.get(canvas);
+        if (prev) { canvas.removeEventListener('mousemove', prev.move); canvas.removeEventListener('mouseleave', prev.leave); }
+
+        let tooltip = canvas.parentElement.querySelector('.chart-tooltip');
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.className = 'chart-tooltip';
+            canvas.parentElement.style.position = 'relative';
+            canvas.parentElement.appendChild(tooltip);
+        }
+        let crosshair = canvas.parentElement.querySelector('.chart-crosshair');
+        if (type === 'line') {
+            if (!crosshair) {
+                crosshair = document.createElement('div');
+                crosshair.className = 'chart-crosshair';
+                crosshair.style.cssText = `position:absolute; top:${padding.top}px; height:${chartH}px; width:1px; background:${accent}; opacity:0; pointer-events:none;`;
+                canvas.parentElement.appendChild(crosshair);
+            }
+        } else if (crosshair) {
+            crosshair.remove();
+        }
+
+        const move = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            let hit = null;
+
+            if (type === 'bar') {
+                hit = points.find(p => mx >= p.x - p.width / 2 && mx <= p.x + p.width / 2 && my >= p.top && my <= padding.top + chartH);
+            } else {
+                // Nearest point by x, regardless of vertical position -- standard line-chart hover.
+                let nearest = points[0], bestDist = Infinity;
+                for (const p of points) {
+                    const d = Math.abs(p.x - mx);
+                    if (d < bestDist) { bestDist = d; nearest = p; }
+                }
+                hit = nearest;
+                if (crosshair) { crosshair.style.left = hit.x + 'px'; crosshair.style.opacity = '1'; }
+            }
+
+            if (hit) {
+                tooltip.innerHTML = `<span class="tt-label">${hit.date.slice(5)}:</span> <span class="tt-value">${hit.value.toLocaleString()}</span>`;
+                tooltip.style.left = hit.x + 'px';
+                tooltip.style.top = (hit.y ?? padding.top) + 'px';
+                tooltip.classList.add('visible');
+            } else {
+                tooltip.classList.remove('visible');
+                if (crosshair) crosshair.style.opacity = '0';
+            }
+        };
+        const leave = () => { tooltip.classList.remove('visible'); if (crosshair) crosshair.style.opacity = '0'; };
+        canvas.addEventListener('mousemove', move);
+        canvas.addEventListener('mouseleave', leave);
+        chartHoverHandlers.set(canvas, { move, leave });
     }
 
     /* DRAG-REORDER — plain HTML5 drag and drop, no library. */

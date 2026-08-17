@@ -1,0 +1,13 @@
+# Render build image -- unlike the local docker-compose setup (which bind-mounts
+# ../frontend into the container at runtime), Render has no volume mounts, so the
+# frontend has to be baked into the image at build time. Build context is the repo
+# root (see render.yaml's dockerContext) specifically so this can reach both
+# backend/ and frontend/ in one COPY set.
+FROM node:18-alpine
+WORKDIR /usr/src/app
+COPY backend/package*.json ./
+RUN npm install --omit=dev
+COPY backend/ .
+COPY frontend/ ./public
+EXPOSE 3000
+CMD ["npm", "start"]

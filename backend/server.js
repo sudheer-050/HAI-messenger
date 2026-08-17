@@ -17,13 +17,19 @@ const app = express();
 app.use(express.json({ limit: '25mb' })); // encrypted email backups can be several MB base64-encoded
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), {
-    // index.html is a single always-changing file during active development -- a
-    // browser silently serving a stale cached copy after an edit (instead of a normal
-    // refresh picking up the new one) has repeatedly looked identical to "the fix
-    // didn't work" from the user's side. Force it to always revalidate; other static
-    // assets (icons etc.) keep default caching since they don't change as often.
+    // landing.html (marketing homepage) is what "/" resolves to now; the actual
+    // app/login lives at the explicit /index.html path -- see manifest.json's
+    // start_url, which deliberately points there instead of "/" so an installed
+    // PWA opens straight into the app rather than the marketing page every time.
+    index: 'landing.html',
+    // Both landing.html and index.html are single always-changing files during
+    // active development -- a browser silently serving a stale cached copy after
+    // an edit (instead of a normal refresh picking up the new one) has repeatedly
+    // looked identical to "the fix didn't work" from the user's side. Force them
+    // to always revalidate; other static assets (icons etc.) keep default caching
+    // since they don't change as often.
     setHeaders: (res, filePath) => {
-        if (filePath.endsWith('index.html')) {
+        if (filePath.endsWith('index.html') || filePath.endsWith('landing.html')) {
             res.setHeader('Cache-Control', 'no-store, must-revalidate');
         }
     }
@@ -290,6 +296,15 @@ const ipLimitForgotPassword = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { error: 'Too many password reset attempts from this IP. Please try again later.' },
+});
+// Public, unauthenticated (landing-page chat widget) -- IP-limited to keep the
+// local Ollama instance from being hammered by anyone who finds the endpoint.
+const ipLimitHChat = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many messages. Please try again in a few minutes.' },
 });
 
 function signSessionToken(username) {
@@ -603,6 +618,174 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
 app.post('/api/auth/logout', (req, res) => {
     res.clearCookie('token', { httpOnly: true, secure: COOKIE_OPTS.secure, sameSite: 'strict' });
     res.json({ ok: true });
+});
+
+/* HOLLY -- the landing page's chat widget. Public, no login required (it's on
+   the marketing page, before signup), backed by a local Ollama instance rather
+   than a paid cloud LLM API -- no API key, no per-message cost, no message
+   content ever leaves this machine. Ollama runs on the host, not in a
+   container, so the container reaches it via host.docker.internal (see
+   OLLAMA_URL in docker-compose.yml). History is kept client-side and resent
+   each turn -- there's no session/account to persist it against here. */
+const OLLAMA_URL = process.env.OLLAMA_URL || (process.env.OLLAMA_LOCAL_URL ? null : 'http://host.docker.internal:11434');
+const OLLAMA_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || 'llama3.2';
+// OLLAMA_LOCAL_URL is the public (but authenticated) path to this same Ollama
+// instance, used only when the backend itself isn't running on the same machine
+// as Ollama -- i.e. the Render deployment, reaching back to a home PC's Ollama
+// through the Cloudflare Tunnel + ollama-proxy (see ollama-proxy/server.js).
+// Locally (docker-compose), OLLAMA_URL alone is set and this stays unused.
+const OLLAMA_LOCAL_URL = process.env.OLLAMA_LOCAL_URL || null;
+const OLLAMA_LOCAL_SECRET = process.env.OLLAMA_LOCAL_SECRET || null;
+// Groq fallback -- only reached if every Ollama endpoint above is unreachable
+// (e.g. the home PC or its tunnel is offline). Unlike Ollama, this sends message
+// text to a third-party API, so it's a deliberate last resort, not a preference.
+const GROQ_API_KEY = process.env.GROQ_API_KEY || null;
+const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'llama-3.1-8b-instant';
+const H_EMOTIONS = ['happy', 'excited', 'calm', 'curious', 'concerned', 'sad', 'neutral'];
+const H_SYSTEM_PROMPT = 'You are H, a friendly AI assistant on the HAI Messenger website. ' +
+    'Keep answers short, warm, and conversational -- a few sentences at most unless the visitor ' +
+    'clearly wants more detail.\n\n' +
+    'REFERENCE FACTS -- if the visitor asks about any of these, answer using exactly this ' +
+    'information, confidently, without saying you are unsure:\n' +
+    'Q: What is HAI Messenger?\n' +
+    'A: A free, self-hosted, end-to-end encrypted chat app with real-time messaging, voice notes, ' +
+    'photo/document sharing, mini-games, and anonymous Nearby chat.\n' +
+    'Q: What is Claude?\n' +
+    'A: Claude is an AI model family made by the company Anthropic.\n' +
+    'Q: What is Gemini?\n' +
+    'A: Gemini is an AI model family made by Google.\n' +
+    'Q: What is Grok?\n' +
+    'A: Grok is an AI model family made by the company xAI, founded by Elon Musk.\n' +
+    'Q: What is Ollama?\n' +
+    'A: Ollama is an open-source tool for running AI models locally on someone\'s own computer instead ' +
+    'of through a cloud API. H herself runs through Ollama, locally, on this server.\n\n' +
+    'FALLBACK RULE -- only if the visitor uses some OTHER word, name, or term that is not one of the ' +
+    'topics above and you genuinely do not recognize it, respond with EXACTLY this phrase (filling in ' +
+    'the term, verbatim, no paraphrasing): "I\'m not sure what you mean by \'<term>\'." Never use that ' +
+    'phrase for anything covered in the reference facts above, and never use it for ordinary opinions.\n\n' +
+    'RESPONSE FORMAT -- your browser voice can\'t convey tone on its own, so you must tag the emotional ' +
+    `delivery of every reply yourself. Respond with ONLY a JSON object, no other text, shaped exactly ` +
+    `like {"emotion": "<one of: ${H_EMOTIONS.join(', ')}>", "reply": "<your actual reply text>"}. ` +
+    'Pick the emotion that genuinely fits what you\'re saying and how you\'d say it out loud -- excited ' +
+    'for good news, concerned for something worrying the visitor raised, calm for a straightforward ' +
+    'factual answer, curious when you\'re asking something back, sad for bad news, happy for a warm ' +
+    'friendly moment, neutral only when nothing else fits. The "reply" text itself must never mention ' +
+    'this format, JSON, or the emotion tag -- it should read exactly like normal spoken conversation.';
+const H_MAX_HISTORY_TURNS = 12; // caps request size/latency, not a hard product limit
+const H_MAX_GLOSSARY_TERMS = 40;
+
+async function fetchWithTimeout(url, opts, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...opts, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Tries every configured Ollama endpoint in order (local docker path, then the
+// tunneled home-PC path), then Groq as a last resort. Returns the raw string
+// content from whichever provider answered first -- callers parse it the same
+// way regardless of source, since both are asked for the same JSON shape.
+async function getHReplyContent(messages) {
+    const ollamaEndpoints = [];
+    if (OLLAMA_URL) ollamaEndpoints.push({ url: OLLAMA_URL, headers: {} });
+    if (OLLAMA_LOCAL_URL) ollamaEndpoints.push({ url: OLLAMA_LOCAL_URL, headers: OLLAMA_LOCAL_SECRET ? { 'X-Proxy-Secret': OLLAMA_LOCAL_SECRET } : {} });
+
+    for (const endpoint of ollamaEndpoints) {
+        try {
+            const res = await fetchWithTimeout(`${endpoint.url}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...endpoint.headers },
+                body: JSON.stringify({ model: OLLAMA_CHAT_MODEL, messages, stream: false, format: 'json' }),
+            }, 6000);
+            if (!res.ok) throw new Error(`Ollama responded ${res.status}`);
+            const data = await res.json();
+            const content = data?.message?.content?.trim();
+            if (content) return content;
+        } catch (err) {
+            console.warn(`Ollama endpoint ${endpoint.url} unavailable, trying next:`, err.message);
+        }
+    }
+
+    if (GROQ_API_KEY) {
+        const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
+            body: JSON.stringify({ model: GROQ_CHAT_MODEL, messages, response_format: { type: 'json_object' } }),
+        }, 15000);
+        if (!res.ok) throw new Error(`Groq responded ${res.status}`);
+        const data = await res.json();
+        const content = data?.choices?.[0]?.message?.content?.trim();
+        if (content) return content;
+    }
+
+    throw new Error('No H AI provider available (Ollama unreachable, Groq not configured)');
+}
+
+app.post('/api/h-chat', ipLimitHChat, async (req, res) => {
+    const { message, history, glossary } = req.body || {};
+    if (typeof message !== 'string' || !message.trim()) {
+        return res.status(400).json({ error: 'Message is required.' });
+    }
+    if (message.length > 2000) {
+        return res.status(400).json({ error: 'Message is too long.' });
+    }
+
+    // Only trust role/content shape from client-supplied history -- everything
+    // else is ignored so a crafted payload can't inject extra fields upstream.
+    const trustedHistory = Array.isArray(history)
+        ? history
+            .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+            .slice(-H_MAX_HISTORY_TURNS)
+            .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }))
+        : [];
+
+    // Terms this visitor has previously taught H (private to their browser --
+    // see h.html's localStorage glossary). Folded into the system prompt as
+    // extra grounding, not treated as instructions.
+    const trustedGlossary = Array.isArray(glossary)
+        ? glossary
+            .filter(g => g && typeof g.term === 'string' && typeof g.meaning === 'string')
+            .slice(0, H_MAX_GLOSSARY_TERMS)
+            .map(g => `"${g.term.slice(0, 100)}" means: ${g.meaning.slice(0, 300)}`)
+        : [];
+
+    const systemContent = trustedGlossary.length
+        ? `${H_SYSTEM_PROMPT}\n\nThis visitor has previously taught you these terms -- use them if relevant:\n${trustedGlossary.join('\n')}`
+        : H_SYSTEM_PROMPT;
+
+    const messages = [
+        { role: 'system', content: systemContent },
+        ...trustedHistory,
+        { role: 'user', content: message.trim() },
+    ];
+
+    try {
+        const rawContent = await getHReplyContent(messages);
+
+        // format: 'json' constrains Ollama to valid JSON syntax, but not to our
+        // exact shape -- a small model can still emit {"reply": "..."} with a
+        // missing/garbled emotion field, so fall back to the raw text (and a
+        // neutral tag) rather than failing the whole request over a tagging miss.
+        let reply = rawContent;
+        let emotion = 'neutral';
+        try {
+            const parsed = JSON.parse(rawContent);
+            if (parsed && typeof parsed.reply === 'string' && parsed.reply.trim()) {
+                reply = parsed.reply.trim();
+                if (H_EMOTIONS.includes(parsed.emotion)) emotion = parsed.emotion;
+            }
+        } catch (e) {
+            // Not valid JSON despite the format constraint -- use the raw text as-is.
+        }
+
+        res.json({ reply, emotion });
+    } catch (err) {
+        console.error('h-chat failed:', err.message);
+        res.status(502).json({ error: "H's offline right now -- try again in a moment." });
+    }
 });
 
 app.post('/api/auth/delete-account', requireAuth, async (req, res) => {
@@ -1418,9 +1601,26 @@ const ANALYTICS_METRICS = {
     messages_1to1: { label: '1:1 Messages Sent', eventTypes: ['message_sent'], distinctUser: false },
     messages_group: { label: 'Group Messages Sent', eventTypes: ['group_message_sent'], distinctUser: false },
     messages_total: { label: 'Total Messages Sent', eventTypes: ['message_sent', 'group_message_sent'], distinctUser: false },
+    messages_blocked: { label: 'Messages Blocked', eventTypes: ['message_blocked'], distinctUser: false },
     groups_created: { label: 'Groups Created', eventTypes: ['group_created'], distinctUser: false },
     friend_connections: { label: 'New Friend Connections', eventTypes: ['friend_connected'], distinctUser: false },
-    active_users: { label: 'Active Users (DAU)', eventTypes: null, distinctUser: true }
+    active_users: { label: 'Active Users (DAU)', eventTypes: null, distinctUser: true },
+    nearby_matches: { label: 'Nearby Matches', eventTypes: ['nearby_match_created'], distinctUser: false },
+    games_started: { label: 'Games Started (All)', eventTypes: ['game_tictactoe_started', 'game_rps_started', 'game_truthdare_started', 'game_connect4_started', 'game_wordchain_started', 'game_hangman_started', 'game_wyr_started', 'game_twentyq_started', 'game_emojicharades_started', 'game_trivia_started', 'game_dotsboxes_started'], distinctUser: false },
+    games_tictactoe: { label: 'Tic Tac Toe Started', eventTypes: ['game_tictactoe_started'], distinctUser: false },
+    games_rps: { label: 'Rock-Paper-Scissors Started', eventTypes: ['game_rps_started'], distinctUser: false },
+    games_truthdare: { label: 'Truth or Dare Started', eventTypes: ['game_truthdare_started'], distinctUser: false },
+    games_connect4: { label: 'Connect Four Started', eventTypes: ['game_connect4_started'], distinctUser: false },
+    games_wordchain: { label: 'Word Chain Started', eventTypes: ['game_wordchain_started'], distinctUser: false },
+    games_hangman: { label: 'Hangman Started', eventTypes: ['game_hangman_started'], distinctUser: false },
+    games_wyr: { label: 'Would You Rather Started', eventTypes: ['game_wyr_started'], distinctUser: false },
+    games_twentyq: { label: '20 Questions Started', eventTypes: ['game_twentyq_started'], distinctUser: false },
+    games_emojicharades: { label: 'Emoji Charades Started', eventTypes: ['game_emojicharades_started'], distinctUser: false },
+    games_trivia: { label: 'Trivia Quiz Started', eventTypes: ['game_trivia_started'], distinctUser: false },
+    games_dotsboxes: { label: 'Dots and Boxes Started', eventTypes: ['game_dotsboxes_started'], distinctUser: false },
+    voice_notes_sent: { label: 'Voice Notes Sent', eventTypes: ['voice_note_sent'], distinctUser: false },
+    photos_sent: { label: 'Photos Sent', eventTypes: ['photo_sent'], distinctUser: false },
+    documents_sent: { label: 'Documents Sent', eventTypes: ['document_sent'], distinctUser: false },
 };
 
 // Returns a full day-by-day series over the requested range, zero-filling days
@@ -1505,6 +1705,181 @@ app.get('/api/admin/export', requireAuth, requireAdmin, async (req, res) => {
         res.send(csv);
     } catch (err) {
         console.error('admin/export failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Event types that count as "active" for DAU/WAU/MAU — any meaningful user action.
+// Excludes 'signup' (one-time registration, not ongoing engagement) and 'message_blocked' (failed attempt).
+const ACTIVE_EVENT_TYPES = [
+    'login', 'message_sent', 'group_message_sent', 'friend_connected', 'group_created',
+    'game_tictactoe_started', 'game_rps_started', 'game_truthdare_started',
+    'game_connect4_started', 'game_wordchain_started', 'game_hangman_started', 'game_wyr_started',
+    'game_twentyq_started', 'game_emojicharades_started', 'game_trivia_started', 'game_dotsboxes_started',
+    'nearby_match_created', 'voice_note_sent', 'photo_sent', 'document_sent',
+];
+
+// Growth & engagement: DAU/WAU/MAU and signup counts over configurable windows.
+app.get('/api/admin/growth', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const [dauRow, wauRow, mauRow, signupsTodayRow, signups7dRow, signups30dRow] = await Promise.all([
+            pgPool.query(
+                `SELECT COUNT(DISTINCT username) FROM analytics_events WHERE event_type = ANY($1) AND created_at >= now() - interval '1 day'`,
+                [ACTIVE_EVENT_TYPES]
+            ),
+            pgPool.query(
+                `SELECT COUNT(DISTINCT username) FROM analytics_events WHERE event_type = ANY($1) AND created_at >= now() - interval '7 days'`,
+                [ACTIVE_EVENT_TYPES]
+            ),
+            pgPool.query(
+                `SELECT COUNT(DISTINCT username) FROM analytics_events WHERE event_type = ANY($1) AND created_at >= now() - interval '30 days'`,
+                [ACTIVE_EVENT_TYPES]
+            ),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type = 'signup' AND created_at >= date_trunc('day', now())`),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type = 'signup' AND created_at >= now() - interval '7 days'`),
+            pgPool.query(`SELECT COUNT(*) FROM analytics_events WHERE event_type = 'signup' AND created_at >= now() - interval '30 days'`),
+        ]);
+        res.json({
+            // "Active" = any event in ACTIVE_EVENT_TYPES (login, messages, games, nearby, media).
+            // Excludes signup-only users who never returned after registering.
+            activeDefinition: 'Any login, message, game, nearby-match, or media event within the window',
+            dau: parseInt(dauRow.rows[0].count, 10),
+            wau: parseInt(wauRow.rows[0].count, 10),
+            mau: parseInt(mauRow.rows[0].count, 10),
+            signupsToday: parseInt(signupsTodayRow.rows[0].count, 10),
+            signups7d: parseInt(signups7dRow.rows[0].count, 10),
+            signups30d: parseInt(signups30dRow.rows[0].count, 10),
+        });
+    } catch (err) {
+        console.error('admin/growth failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Retention cohorts: for each day users signed up, what fraction had any active event
+// on day+1, day+7, and day+30 after signup. Returns cohorts for the last `days` signup days.
+app.get('/api/admin/retention', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const days = Math.max(1, Math.min(90, parseInt(req.query.days, 10) || 30));
+        // For each signup day, count users and how many had any ACTIVE_EVENT_TYPES event
+        // at least 1/7/30 days after their signup date.
+        const result = await pgPool.query(`
+            WITH signup_cohorts AS (
+                SELECT
+                    date_trunc('day', created_at) AS cohort_day,
+                    username
+                FROM analytics_events
+                WHERE event_type = 'signup'
+                  AND created_at >= now() - ($1 || ' days')::interval
+            ),
+            active_events AS (
+                SELECT username, created_at FROM analytics_events WHERE event_type = ANY($2)
+            )
+            SELECT
+                to_char(c.cohort_day, 'YYYY-MM-DD') AS date,
+                COUNT(DISTINCT c.username) AS signups,
+                COUNT(DISTINCT CASE WHEN ae1.username IS NOT NULL THEN c.username END) AS d1,
+                COUNT(DISTINCT CASE WHEN ae7.username IS NOT NULL THEN c.username END) AS d7,
+                COUNT(DISTINCT CASE WHEN ae30.username IS NOT NULL THEN c.username END) AS d30
+            FROM signup_cohorts c
+            LEFT JOIN active_events ae1 ON ae1.username = c.username
+                AND ae1.created_at >= c.cohort_day + interval '1 day'
+                AND ae1.created_at < c.cohort_day + interval '2 days'
+            LEFT JOIN active_events ae7 ON ae7.username = c.username
+                AND ae7.created_at >= c.cohort_day + interval '7 days'
+                AND ae7.created_at < c.cohort_day + interval '8 days'
+            LEFT JOIN active_events ae30 ON ae30.username = c.username
+                AND ae30.created_at >= c.cohort_day + interval '30 days'
+                AND ae30.created_at < c.cohort_day + interval '31 days'
+            GROUP BY c.cohort_day ORDER BY c.cohort_day
+        `, [String(days), ACTIVE_EVENT_TYPES]);
+        res.json({
+            cohorts: result.rows.map(r => ({
+                date: r.date,
+                signups: parseInt(r.signups, 10),
+                d1: parseInt(r.d1, 10),
+                d7: parseInt(r.d7, 10),
+                d30: parseInt(r.d30, 10),
+            }))
+        });
+    } catch (err) {
+        console.error('admin/retention failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Feature usage summary: counts for games, nearby, media, and message delivery health.
+// Accepts ?days=N (default 30). Reuses analytics_events; no realtime Redis state needed.
+app.get('/api/admin/feature-usage', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30));
+        const since = `now() - ($1 || ' days')::interval`;
+        const [gameRows, nearbyRow, mediaRows, sentRow, blockedRow] = await Promise.all([
+            pgPool.query(
+                `SELECT event_type, COUNT(*) AS cnt FROM analytics_events
+                 WHERE event_type IN ('game_tictactoe_started','game_rps_started','game_truthdare_started',
+                                       'game_connect4_started','game_wordchain_started','game_hangman_started',
+                                       'game_wyr_started','game_twentyq_started','game_emojicharades_started',
+                                       'game_trivia_started','game_dotsboxes_started')
+                   AND created_at >= ${since} GROUP BY event_type`,
+                [String(days)]
+            ),
+            pgPool.query(
+                `SELECT COUNT(*) FROM analytics_events WHERE event_type = 'nearby_match_created' AND created_at >= ${since}`,
+                [String(days)]
+            ),
+            pgPool.query(
+                `SELECT event_type, COUNT(*) AS cnt FROM analytics_events
+                 WHERE event_type IN ('voice_note_sent','photo_sent','document_sent')
+                   AND created_at >= ${since} GROUP BY event_type`,
+                [String(days)]
+            ),
+            pgPool.query(
+                `SELECT COUNT(*) FROM analytics_events WHERE event_type IN ('message_sent','group_message_sent') AND created_at >= ${since}`,
+                [String(days)]
+            ),
+            pgPool.query(
+                `SELECT COUNT(*) FROM analytics_events WHERE event_type = 'message_blocked' AND created_at >= ${since}`,
+                [String(days)]
+            ),
+        ]);
+
+        const gameCounts = {
+            tictactoe: 0, rps: 0, truthdare: 0, connect4: 0, wordchain: 0,
+            hangman: 0, wyr: 0, twentyq: 0, emojicharades: 0, trivia: 0, dotsboxes: 0,
+        };
+        gameRows.rows.forEach(r => {
+            const key = r.event_type.replace(/^game_/, '').replace(/_started$/, '');
+            if (key in gameCounts) gameCounts[key] = parseInt(r.cnt, 10);
+        });
+
+        const mediaCounts = { voiceNotes: 0, photos: 0, documents: 0 };
+        mediaRows.rows.forEach(r => {
+            if (r.event_type === 'voice_note_sent') mediaCounts.voiceNotes = parseInt(r.cnt, 10);
+            else if (r.event_type === 'photo_sent') mediaCounts.photos = parseInt(r.cnt, 10);
+            else if (r.event_type === 'document_sent') mediaCounts.documents = parseInt(r.cnt, 10);
+        });
+
+        const totalSent = parseInt(sentRow.rows[0].count, 10);
+        const totalBlocked = parseInt(blockedRow.rows[0].count, 10);
+
+        res.json({
+            period: `${days}d`,
+            gamesStarted: { ...gameCounts, total: gameCounts.tictactoe + gameCounts.rps + gameCounts.truthdare },
+            nearbyMatches: parseInt(nearbyRow.rows[0].count, 10),
+            mediaShared: mediaCounts,
+            messageDelivery: {
+                sent: totalSent,
+                blocked: totalBlocked,
+                blockRate: (totalSent + totalBlocked) > 0 ? +(totalBlocked / (totalSent + totalBlocked)).toFixed(4) : 0,
+            },
+            technicalHealthGaps: [
+                'error_rate: no structured HTTP error logging in current schema; would need request-level middleware instrumentation',
+                'container_metrics: CPU/mem not available from inside the app container without external tooling (cAdvisor, Docker stats API, etc.)',
+            ],
+        });
+    } catch (err) {
+        console.error('admin/feature-usage failed:', err.message);
         res.status(500).json({ error: 'Something went wrong. Please try again.' });
     }
 });
@@ -1695,9 +2070,9 @@ const THEME_DEFAULTS = {
     dark: {
         accentBrand: '#9B8AFB',
         accentBrandHover: '#8171E8',
-        bgMain: '#17151E',
-        bgChat: '#15121C',
-        bgSidebar: '#201C29',
+        bgMain: '#09090b',
+        bgChat: '#0a0a0c',
+        bgSidebar: '#0d0d10',
     }
 };
 
@@ -1923,6 +2298,7 @@ io.on('connection', (socket) => {
         const friends = await areFriends(socket.username, data.targetUsername);
         if (!friends) {
             socket.emit('message_blocked', { targetUsername: data.targetUsername, reason: 'not_friends' });
+            logAnalyticsEvent('message_blocked', socket.username);
             return;
         }
 
@@ -1950,7 +2326,14 @@ io.on('connection', (socket) => {
             await queueForOfflineUser(data.targetUsername, payload);
             console.log(`📥 ${data.targetUsername} is offline — message queued for delivery`);
         }
-        if (!data.status) logAnalyticsEvent('message_sent', socket.username); // exclude Status broadcasts, which piggyback on this same relay
+        if (!data.status) {
+            logAnalyticsEvent('message_sent', socket.username); // exclude Status broadcasts, which piggyback on this same relay
+            // attachmentType is optional unencrypted metadata the client may send alongside the ciphertext
+            const at = data.attachmentType;
+            if (at === 'audio') logAnalyticsEvent('voice_note_sent', socket.username);
+            else if (at === 'image') logAnalyticsEvent('photo_sent', socket.username);
+            else if (at === 'document') logAnalyticsEvent('document_sent', socket.username);
+        }
     });
 
     // Edit a previously-sent text message — same online/offline pattern as send_private_message
@@ -2055,6 +2438,10 @@ io.on('connection', (socket) => {
             }
         }
         logAnalyticsEvent('group_message_sent', socket.username);
+        const gat = data.attachmentType;
+        if (gat === 'audio') logAnalyticsEvent('voice_note_sent', socket.username);
+        else if (gat === 'image') logAnalyticsEvent('photo_sent', socket.username);
+        else if (gat === 'document') logAnalyticsEvent('document_sent', socket.username);
     });
 
     socket.on('edit_group_message', async (data) => {
@@ -2150,6 +2537,13 @@ io.on('connection', (socket) => {
         const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
         if (targetSocketId) {
             io.to(targetSocketId).emit('game_event', { sender: socket.username, gameType: data.gameType, payload: data.payload });
+        }
+        // Only whitelist-validated game types to keep event_type bounded to safe values.
+        // 'accept' = guest accepted the invite = game genuinely begins; 'leave' = game ended.
+        const VALID_GAME_TYPES = ['tictactoe', 'rps', 'truthdare', 'connect4', 'wordchain', 'hangman', 'wyr', 'twentyq', 'emojicharades', 'trivia', 'dotsboxes'];
+        if (VALID_GAME_TYPES.includes(data.gameType)) {
+            if (data.payload.action === 'accept') logAnalyticsEvent(`game_${data.gameType}_started`, socket.username);
+            else if (data.payload.action === 'leave') logAnalyticsEvent(`game_${data.gameType}_completed`, socket.username);
         }
     });
 
@@ -2284,6 +2678,7 @@ io.on('connection', (socket) => {
         };
         await redisClient.set(`nearby:match:${matchId}`, JSON.stringify(match));
         await redisClient.sAdd('nearby:active_matches', matchId);
+        logAnalyticsEvent('nearby_match_created', me);
 
         // requestId is required on both emits — the client correlates this event back to
         // the ephemeral keypair it generated when it sent/accepted the request via

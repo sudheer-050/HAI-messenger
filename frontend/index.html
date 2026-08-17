@@ -56,21 +56,24 @@
 
     <style>
         :root {
-            --bg-main: #EEECF7;
-            --bg-sidebar: #FBFAFE;
-            --bg-chat: #FAF7F2;
-            --menu-surface: rgba(251, 250, 254, 0.97);
-            --accent-brand: #6C5DD3;
-            --accent-brand-hover: #5847B8;
+            /* Black is the only theme now (no light mode) -- these are the same
+               values as the former :root[data-theme="dark"] block, set as the
+               base default so there's no flash-of-light-theme before JS runs. */
+            --bg-main: #09090b;
+            --bg-sidebar: #0d0d10;
+            --bg-chat: #0a0a0c;
+            --menu-surface: rgba(13, 13, 16, 0.97);
+            --accent-brand: #9B8AFB;
+            --accent-brand-hover: #8171E8;
             --accent-green: #23a55a;
             --accent-red: #da373c;
             --accent-gold: #e0b400;
             --accent-favorite: #ffd815;
-            --border-color: #e2e5e9;
-            --text-normal: #1c1e21;
-            --text-muted: #65676b;
-            --input-bg: #eef0f2;
-            --avatar-placeholder-bg: #9aa1a9;
+            --border-color: #1f1f23;
+            --text-normal: #fafafa;
+            --text-muted: #a1a1aa;
+            --input-bg: #18181b;
+            --avatar-placeholder-bg: #3f3f46;
             --font-stack: 'Inter', system-ui, -apple-system, sans-serif, 'Noto Color Emoji';
             --bubble-radius: 12px;
             --bubble-radius-tail: 3px;
@@ -81,23 +84,27 @@
                directly over the wallpaper, -strong for cards/popups that need to stay
                legible over arbitrary content behind them. */
             --glass-blur: blur(24px) saturate(180%);
-            --glass-weak: rgba(255, 255, 255, 0.32);
-            --glass-strong: rgba(255, 255, 255, 0.55);
-            --glass-border: rgba(255, 255, 255, 0.55);
+            --glass-weak: rgba(255, 255, 255, 0.05);
+            --glass-strong: rgba(255, 255, 255, 0.08);
+            --glass-border: rgba(255, 255, 255, 0.12);
         }
 
         :root[data-theme="dark"] {
-            --bg-main: #17151E;
-            --bg-sidebar: #201C29;
-            --bg-chat: #15121C;
-            --menu-surface: rgba(32, 28, 41, 0.97);
-            --border-color: #2c2f36;
-            --text-normal: #e8eaed;
-            --text-muted: #9098a3;
-            --input-bg: #262a31;
-            --avatar-placeholder-bg: #454a52;
-            --glass-weak: rgba(30, 33, 38, 0.4);
-            --glass-strong: rgba(30, 33, 38, 0.6);
+            /* #09090b -- same near-black used across landing.html/h.html, so
+               the whole product reads as one consistent black brand rather than
+               marketing pages being black and the app itself being a different
+               dark grey. */
+            --bg-main: #09090b;
+            --bg-sidebar: #0d0d10;
+            --bg-chat: #0a0a0c;
+            --menu-surface: rgba(13, 13, 16, 0.97);
+            --border-color: #1f1f23;
+            --text-normal: #fafafa;
+            --text-muted: #a1a1aa;
+            --input-bg: #18181b;
+            --avatar-placeholder-bg: #3f3f46;
+            --glass-weak: rgba(255, 255, 255, 0.05);
+            --glass-strong: rgba(255, 255, 255, 0.08);
             --glass-border: rgba(255, 255, 255, 0.12);
             --accent-brand: #9B8AFB;
             --accent-brand-hover: #8171E8;
@@ -209,6 +216,17 @@
             overflow: hidden;
         }
         .brand-logo img { width: 100%; height: 100%; object-fit: cover; }
+        .sidebar-home-link {
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            transition: transform 0.15s ease;
+        }
+        .sidebar-home-link:hover { transform: scale(1.06); }
+        .sidebar-home-link img { width: 100%; height: 100%; object-fit: cover; }
 
         .setup-card h2 {
             margin: 0 0 6px 0;
@@ -946,6 +964,79 @@
         .chat-header-menu-btn:hover { background: rgba(0, 0, 0, 0.08); color: var(--text-normal); }
         .chat-header-menu-btn .icon { width: 18px; height: 18px; }
 
+        .ai-voice-toggle-btn.active { color: var(--accent-gold); }
+
+        .global-voice-btn {
+            position: fixed;
+            /* Desktop: beside the status FAB (left: 28px, 56px wide), to its right. */
+            left: 94px;
+            right: auto;
+            bottom: 28px;
+            z-index: 40;
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            border: none;
+            background: var(--glass-strong);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            overflow: hidden;
+            padding: 0;
+            transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+        }
+        .global-voice-btn:hover { transform: scale(1.05); color: var(--text-normal); }
+        .global-voice-btn .icon { width: 22px; height: 22px; }
+        .global-voice-btn canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            border-radius: 50%;
+        }
+        .global-voice-btn.listening {
+            color: #fff;
+            animation: globalVoicePulse 0.8s ease-in-out infinite;
+        }
+        @keyframes globalVoicePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+
+        .ai-voice-status-banner {
+            display: none;
+            background: var(--glass-weak);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-bottom: 1px solid var(--glass-border);
+            padding: 10px 24px;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .ai-voice-status-banner.visible { display: flex; }
+        .ai-voice-status-banner .ai-voice-status-text { display: flex; align-items: center; gap: 8px; }
+        .ai-voice-status-banner .icon { width: 15px; height: 15px; color: var(--accent-gold); }
+        .ai-voice-status-banner .ai-voice-cancel-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2px;
+        }
+        .ai-voice-status-banner .ai-voice-cancel-btn:hover { color: var(--text-normal); }
+        .ai-voice-status-banner .ai-voice-cancel-btn .icon { width: 14px; height: 14px; color: inherit; }
+
         .header-menu-dropdown {
             display: none;
             position: absolute;
@@ -983,7 +1074,8 @@
            Fix: give the dropdown a near-opaque solid surface in this context only.
            The hamburger dropdown (in .chat-list-header, which has no backdrop-filter)
            keeps the glass treatment — its backdrop-filter can sample correctly. */
-        .chat-header .header-menu-dropdown {
+        .chat-header .header-menu-dropdown,
+        .hamburger-dropdown {
             background: var(--menu-surface);
             backdrop-filter: none;
             -webkit-backdrop-filter: none;
@@ -2418,6 +2510,87 @@
         .td-choice-row { display: flex; gap: 8px; }
         .td-choice-row .game-primary-btn { flex: 1; }
 
+        /* Shared text-input row (Word Chain, 20 Questions, Emoji Charades) */
+        .wc-input-row { display: flex; gap: 8px; }
+        .game-text-input {
+            flex: 1;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: var(--input-bg);
+            color: var(--text-normal);
+            font-family: var(--font-stack);
+            font-size: 13px;
+            outline: none;
+        }
+        .game-text-input:focus { border-color: var(--game-accent); }
+        .wc-input-row .game-primary-btn { flex-shrink: 0; padding: 10px 14px; }
+
+        /* Connect Four */
+        .c4-grid { display: grid; gap: 5px; background: var(--input-bg); border-radius: 12px; padding: 8px; }
+        .c4-cell { aspect-ratio: 1; border-radius: 50%; border: 1px solid var(--border-color); background: var(--bg-sidebar); cursor: pointer; padding: 0; }
+        .c4-cell:disabled { cursor: default; }
+        .c4-cell.c4-red { background: #e5484d; border-color: #e5484d; }
+        .c4-cell.c4-yellow { background: #f5c518; border-color: #f5c518; }
+        .c4-cell.win { box-shadow: 0 0 0 3px var(--game-accent) inset; }
+
+        /* Word Chain */
+        .wc-log { display: flex; flex-wrap: wrap; gap: 6px; max-height: 160px; overflow-y: auto; }
+        .wc-word-chip { display: flex; flex-direction: column; align-items: center; background: var(--input-bg); border-radius: 10px; padding: 6px 10px; font-size: 13px; font-weight: 600; color: var(--text-normal); text-transform: capitalize; }
+        .wc-word-chip small { font-size: 9px; font-weight: 500; color: var(--text-muted); text-transform: none; }
+
+        /* Hangman */
+        .hangman-word { text-align: center; font-size: 22px; font-weight: 700; letter-spacing: 4px; color: var(--text-normal); margin: 4px 0; }
+        .hangman-keyboard { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+        .hangman-key {
+            padding: 8px 0; border-radius: 8px; border: 1px solid var(--border-color);
+            background: var(--input-bg); color: var(--text-normal); font-family: var(--font-stack);
+            font-size: 12px; font-weight: 700; cursor: pointer;
+        }
+        .hangman-key:hover { background: var(--game-accent); color: #fff; }
+        .hangman-key.used { opacity: 0.35; cursor: default; }
+
+        /* Would You Rather */
+        .wyr-options { display: flex; flex-direction: column; gap: 8px; }
+        .wyr-option-btn, .wyr-option-card {
+            padding: 14px; border-radius: 12px; border: 1px solid var(--border-color);
+            background: var(--input-bg); color: var(--text-normal); font-family: var(--font-stack);
+            font-size: 13.5px; text-align: center; cursor: pointer; line-height: 1.4;
+        }
+        .wyr-option-btn:hover { background: var(--game-accent); color: #fff; }
+        .wyr-option-card p { margin: 0; }
+        .wyr-option-card.mine { border-color: var(--game-accent); box-shadow: 0 0 0 1px var(--game-accent) inset; }
+        .wyr-option-card.theirs::after { content: ' 👤'; }
+
+        /* Trivia */
+        .trivia-question { text-align: center; font-size: 14.5px; font-weight: 600; color: var(--text-normal); margin: 4px 0 10px; }
+        .trivia-choices { display: flex; flex-direction: column; gap: 8px; }
+        .trivia-choice-btn, .trivia-choice {
+            padding: 11px; border-radius: 10px; border: 1px solid var(--border-color);
+            background: var(--input-bg); color: var(--text-normal); font-family: var(--font-stack);
+            font-size: 13px; text-align: left; cursor: pointer;
+        }
+        .trivia-choice-btn:hover { background: var(--game-accent); color: #fff; }
+        .trivia-choice.correct { background: rgba(70, 167, 88, 0.18); border-color: #46a758; color: #46a758; font-weight: 700; }
+        .trivia-choice.wrong { background: rgba(229, 72, 77, 0.15); border-color: #e5484d; color: #e5484d; }
+
+        /* Emoji Charades */
+        .emoji-clue-display { text-align: center; font-size: 34px; margin: 6px 0; }
+
+        /* Dots and Boxes */
+        .db-grid { display: grid; gap: 2px; justify-content: center; background: var(--input-bg); border-radius: 12px; padding: 10px; }
+        .db-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); align-self: center; justify-self: center; }
+        .db-edge { border: none; padding: 0; cursor: pointer; background: transparent; border-radius: 3px; }
+        .db-edge:disabled { cursor: default; }
+        .db-edge-h { width: 26px; height: 6px; }
+        .db-edge-v { width: 6px; height: 26px; }
+        .db-edge:not(:disabled):hover { background: var(--border-color); }
+        .db-edge.drawn-me { background: var(--game-accent); }
+        .db-edge.drawn-opp { background: var(--text-muted); }
+        .db-box { width: 26px; height: 26px; border-radius: 4px; }
+        .db-box.owned-me { background: rgba(155, 138, 251, 0.35); }
+        .db-box.owned-opp { background: rgba(161, 161, 170, 0.35); }
+
         .profile-cover {
             height: 140px;
             flex-shrink: 0; /* prevent cover from compressing when card has a fixed height */
@@ -3251,6 +3424,8 @@
             .status-fab-tray { display: none !important; }
             .status-fab-wrap { left: auto; right: 16px; bottom: calc(120px + env(safe-area-inset-bottom)); }
             .status-fab-btn { width: 50px; height: 50px; min-width: 50px; }
+            /* Mobile: beside the status FAB (right: 16px, 50px wide), to its left. */
+            .global-voice-btn { left: auto; right: 76px; bottom: calc(120px + env(safe-area-inset-bottom)); }
         }
 
         /* ALL IN-PANEL AUX VIEWS (Profile/Trash/Settings/Friends) — same Liquid-Glass
@@ -3497,9 +3672,9 @@
     <div id="setup">
         <div class="logo-watermark-layer" id="setupLogoWatermarkLayer"></div>
         <div class="setup-card">
-            <div class="brand-logo">
+            <a class="brand-logo" href="/" title="Back to homepage">
                 <img src="/icons/logo.png" alt="HAI">
-            </div>
+            </a>
             <h2>HAI</h2>
             <p id="authSubtitle">Log in to unlock your local encrypted session vault.</p>
 
@@ -3530,6 +3705,13 @@
                         <button type="button" class="toggle-password-btn" id="passwordToggleBtn" onclick="togglePasswordVisibility()"><span data-icon="eye"></span></button>
                     </div>
                     <p id="forgotPasswordLink" style="font-size: 12px; margin-top: 6px; text-align: right; cursor: pointer; color: var(--accent-brand);" onclick="openForgotPasswordModal()">Forgot password?</p>
+                </div>
+
+                <div id="termsConsentRow" style="display: none; align-items: flex-start; gap: 8px; margin: 4px 0 16px;">
+                    <input type="checkbox" id="termsConsentCheckbox" style="margin-top: 3px; flex-shrink: 0;">
+                    <label for="termsConsentCheckbox" style="font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: left;">
+                        I agree to the <a href="/terms.html" target="_blank" style="color: var(--accent-brand);">Terms of Service</a> and <a href="/privacy.html" target="_blank" style="color: var(--accent-brand);">Privacy Policy</a>.
+                    </label>
                 </div>
 
                 <button type="button" class="btn-submit" id="authSubmitBtn" onclick="handleAuthSubmit()">Sign In</button>
@@ -3618,6 +3800,9 @@
             <div class="logo-watermark-layer" id="sidebarLogoWatermarkLayer"></div>
             <div class="chat-list-header">
                 <div class="chat-list-header-left">
+                    <a href="/" class="sidebar-home-link" title="Back to homepage">
+                        <img src="/icons/logo.png" alt="HAI">
+                    </a>
                     <div class="hamburger-menu-wrap">
                         <button type="button" class="chat-header-menu-btn" onclick="toggleHamburgerMenu(event)" title="Menu"><span data-icon="menu"></span><span id="hamburgerNotifyDot" class="hamburger-notify-dot"></span></button>
                         <div class="header-menu-dropdown hamburger-dropdown" id="hamburgerMenuDropdown">
@@ -3673,6 +3858,7 @@
                 <h2 style="margin: 0;">Select a conversation to start chatting</h2>
             </div>
             <div class="chat-header-actions">
+                <button type="button" id="aiVoiceToggleBtn" class="chat-header-menu-btn ai-voice-toggle-btn" data-icon="volume" title="AI Voice Mode" onclick="toggleAiVoiceMode(currentActiveUser, !isAiVoiceModeEnabled(currentActiveUser))" style="display:none;"></button>
                 <button type="button" id="chatMoreMenuBtn" class="chat-header-menu-btn" data-icon="more" onclick="toggleHeaderMenu(event)"></button>
                 <div class="header-menu-dropdown" id="headerMenuDropdown">
                     <button type="button" onclick="headerMenuViewProfile()" id="headerMenuViewProfileBtn">View Profile</button>
@@ -3685,6 +3871,11 @@
                     <button type="button" onclick="headerMenuLeaveGroup()" id="headerMenuLeaveGroupBtn" style="display:none; color: var(--accent-red);">Leave Group</button>
                 </div>
             </div>
+        </div>
+
+        <div class="ai-voice-status-banner" id="aiVoiceStatusBanner">
+            <span class="ai-voice-status-text"><span data-icon="volume"></span><span id="aiVoiceStatusText"></span></span>
+            <button type="button" class="ai-voice-cancel-btn" title="Stop" onclick="cancelAiVoiceFlow()"><span data-icon="close"></span></button>
         </div>
 
         <div class="nearby-ephemeral-banner" id="nearbyEphemeralBanner">
@@ -3938,12 +4129,6 @@
 
                     <!-- CHATS -->
                     <div id="settingsPanel-chats" class="settings-panel" style="display: none;">
-                        <div class="settings-section-title">Theme</div>
-                        <div class="settings-choice-list">
-                            <button type="button" class="settings-choice-row" id="themeBtn-light" onclick="setAppTheme('light')"><span data-icon="sun"></span><span class="settings-choice-label">Light</span><span class="settings-choice-check" data-icon="checkSingle"></span></button>
-                            <button type="button" class="settings-choice-row" id="themeBtn-dark" onclick="setAppTheme('dark')"><span data-icon="moon"></span><span class="settings-choice-label">Dark</span><span class="settings-choice-check" data-icon="checkSingle"></span></button>
-                        </div>
-
                         <div class="settings-section-title">Font Size</div>
                         <div class="settings-choice-list">
                             <button type="button" class="settings-choice-row" id="fontSizeBtn-small" onclick="setMessageFontSize('small')"><span class="settings-choice-label">Small</span><span class="settings-choice-check" data-icon="checkSingle"></span></button>
@@ -4308,6 +4493,12 @@
 
 <!-- TOAST CONTAINER -->
 <div id="haiToastContainer"></div>
+
+<!-- GLOBAL VOICE CONTROL — always-visible mic toggle, independent of chat state -->
+<button type="button" class="global-voice-btn" id="globalVoiceControlBtn" style="display: none;" title="Voice control" onclick="toggleGlobalVoiceControl()">
+    <canvas id="globalVoiceCanvas" width="52" height="52" style="display:none;"></canvas>
+    <span data-icon="mic" id="globalVoiceFallbackIcon"></span>
+</button>
 
 <!-- REUSABLE CONFIRM DIALOG -->
 <div class="modal-overlay" id="haiConfirmOverlay">
@@ -6776,7 +6967,15 @@
     const GAME_LIST = [
         { type: 'tictactoe', title: 'Tic Tac Toe' },
         { type: 'rps', title: 'Stone Paper Scissors' },
-        { type: 'truthdare', title: 'Truth or Dare' }
+        { type: 'truthdare', title: 'Truth or Dare' },
+        { type: 'connect4', title: 'Connect Four' },
+        { type: 'wordchain', title: 'Word Chain' },
+        { type: 'hangman', title: 'Hangman' },
+        { type: 'wyr', title: 'Would You Rather' },
+        { type: 'twentyq', title: '20 Questions' },
+        { type: 'emojicharades', title: 'Emoji Charades' },
+        { type: 'trivia', title: 'Trivia Quiz' },
+        { type: 'dotsboxes', title: 'Dots and Boxes' }
     ];
     function openGamesMenu() {
         if (!currentActiveUser) return showToast("Select a conversation first.", 'info');
@@ -7074,12 +7273,16 @@
                     if (replyTextPayload) {
                         encReplyToText = await encryptPayloadForUser(targetPubKeyBase64, replyTextPayload);
                     }
+                    // attachmentType is unencrypted metadata so the server can log media analytics
+                    // without seeing content. Omitted for text messages and non-file types like location.
+                    const attachmentTypeMap = { image: 'image', audio: 'audio', document: 'document' };
                     socket.emit('send_private_message', {
                         id: messageId,
                         targetUsername: currentActiveUser,
                         encryptedMessage: encryptedBundle,
                         replyToText: encReplyToText,
-                        replyToId: replyIdPayload
+                        replyToId: replyIdPayload,
+                        attachmentType: attachmentTypeMap[mediaPayload.fileType] || undefined,
                     });
                 } catch (err) {
                     showToast("Failed to encrypt attachment: " + err.message, 'error'); return;
@@ -7899,6 +8102,17 @@
                 </div>
                 <label class="settings-toggle"><input type="checkbox" ${isCloseFriend ? 'checked' : ''} onchange="toggleCloseFriendFromProfile('${username}', this.checked)"><span class="settings-toggle-slider"></span></label>
             </div>
+            ${isAiVoiceModeSupported() ? `
+            <div class="profile-action-row">
+                <div class="profile-action-row-left">
+                    ${icon('volume')}
+                    <div>
+                        <div class="profile-action-row-label">AI Voice Mode</div>
+                        <div class="profile-action-row-desc">${isAiVoiceModeSupportedForReply() ? 'Reads new messages aloud and lets you reply by voice' : 'Reads new messages aloud (voice replies not supported in this browser)'}</div>
+                    </div>
+                </div>
+                <label class="settings-toggle"><input type="checkbox" ${isAiVoiceModeEnabled(username) ? 'checked' : ''} onchange="toggleAiVoiceMode('${username}', this.checked)"><span class="settings-toggle-slider"></span></label>
+            </div>` : ''}
             <div class="profile-action-row clickable" onclick="showEncryptionInfo('${username}')">
                 <div class="profile-action-row-left">
                     ${icon('lock')}
@@ -7945,6 +8159,740 @@
         if (!conversationHistory[username]) return;
         conversationHistory[username]._muted = checked;
         persistConversations();
+    }
+
+    /* AI VOICE MODE — per-1:1-chat toggle. When on, incoming messages in the
+       currently-open chat are read aloud (sentence-chunked for long messages,
+       with a spoken "hear more?" check), followed by a spoken "reply?" prompt
+       that, if answered yes, listens for a spoken reply and drops the transcript
+       into the message box for the user to review and send manually. Pure
+       client-side Web Speech API -- no backend involvement. */
+    function isAiVoiceModeSupported() {
+        return 'speechSynthesis' in window;
+    }
+    function isAiVoiceModeSupportedForReply() {
+        return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    }
+    function isAiVoiceModeEnabled(username) {
+        return !!(username && conversationHistory[username] && conversationHistory[username]._aiVoiceMode);
+    }
+    function toggleAiVoiceMode(username, checked) {
+        if (!username || !conversationHistory[username]) return;
+        if (checked) unlockSpeechSynthesisForMobile();
+        conversationHistory[username]._aiVoiceMode = checked;
+        persistConversations();
+        if (!checked && aiVoiceFlow && aiVoiceFlow.peer === username) cancelAiVoiceFlow();
+        if (username === currentActiveUser) syncAiVoiceToggleBtn(username);
+    }
+    function syncAiVoiceToggleBtn(username) {
+        const btn = document.getElementById('aiVoiceToggleBtn');
+        if (!btn) return;
+        const show = isAiVoiceModeSupported() && !!username && !isGroupChatKey(username);
+        btn.style.display = show ? 'flex' : 'none';
+        btn.classList.toggle('active', show && isAiVoiceModeEnabled(username));
+    }
+
+    let aiVoiceFlow = null; // null when idle, else { peer, sentences, idx, mode, recognition }
+
+    function splitIntoSentences(text) {
+        const parts = (text || '').match(/[^.!?]+[.!?]+|[^.!?]+$/g);
+        return (parts || [text || '']).map(s => s.trim()).filter(Boolean);
+    }
+
+    function describeMessageForSpeech(msg) {
+        if (msg.media && msg.media.fileType) return `${msg.sender} sent a ${msg.media.fileType}`;
+        return `${msg.sender} says: ${msg.text}`;
+    }
+
+    function renderAiVoiceStatusBanner(text) {
+        const banner = document.getElementById('aiVoiceStatusBanner');
+        const textEl = document.getElementById('aiVoiceStatusText');
+        if (!banner || !textEl) return;
+        textEl.innerText = text;
+        banner.classList.add('visible');
+    }
+    function hideAiVoiceStatusBanner() {
+        const banner = document.getElementById('aiVoiceStatusBanner');
+        if (banner) banner.classList.remove('visible');
+    }
+
+    function startAiVoiceFlow(peer, msg) {
+        if (!isAiVoiceModeSupported() || isGroupChatKey(peer)) return;
+        if (aiVoiceFlow) return; // a flow is already in progress -- don't interrupt it
+        aiVoiceFlow = {
+            peer: peer,
+            sentences: splitIntoSentences(describeMessageForSpeech(msg)),
+            idx: 0,
+            mode: 'speaking',
+            recognition: null
+        };
+        speakSentenceChunk();
+    }
+
+    function cancelAiVoiceFlow() {
+        try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+        if (aiVoiceFlow && aiVoiceFlow.recognition) {
+            try { aiVoiceFlow.recognition.onresult = null; aiVoiceFlow.recognition.onerror = null; aiVoiceFlow.recognition.onend = null; aiVoiceFlow.recognition.stop(); } catch (e) {}
+        }
+        aiVoiceFlow = null;
+        hideAiVoiceStatusBanner();
+    }
+
+    // Mobile browsers (iOS Safari, many Android WebViews) only allow
+    // speechSynthesis.speak() to produce audio if the very first call in the
+    // page's lifetime happens synchronously inside a user gesture. Both AI Voice
+    // Mode and Global Voice Control always speak later, after an await'd fetch or
+    // recognition result -- too late to count as "the gesture" -- so fire one
+    // silent, zero-volume utterance right in the tap handler that turns each
+    // feature on, purely to unlock audio for every real speak() call after it.
+    let speechUnlockedForMobile = false;
+    function unlockSpeechSynthesisForMobile() {
+        if (speechUnlockedForMobile || !('speechSynthesis' in window)) return;
+        speechUnlockedForMobile = true;
+        try {
+            const unlock = new SpeechSynthesisUtterance(' ');
+            unlock.volume = 0;
+            window.speechSynthesis.speak(unlock);
+        } catch (e) {}
+    }
+
+    // Picks the calmest-sounding female system voice available (browsers expose
+    // no real "tone" metadata, just name/lang -- this is a best-effort match
+    // against common feminine-labeled voice names, not literal voice cloning).
+    // Resolved ONCE and cached for the rest of the session -- a single, consistent
+    // voice throughout, never re-picked mid-conversation.
+    let preferredVoiceCache = null;
+    let voicesReadyPromise = null;
+    // getVoices() returns [] until the browser finishes loading its voice list
+    // asynchronously; speaking before that resolves falls back to the OS default
+    // voice (often male on Windows) for just the first utterance, then the real
+    // pick kicks in from the second one on -- audibly a voice switch mid-conversation.
+    // Waiting here means the very first thing spoken already uses the locked-in voice.
+    function ensureVoicesLoaded() {
+        if (voicesReadyPromise) return voicesReadyPromise;
+        voicesReadyPromise = new Promise(resolve => {
+            const existing = window.speechSynthesis.getVoices();
+            if (existing.length) { resolve(existing); return; }
+            window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
+            setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
+        });
+        return voicesReadyPromise;
+    }
+    function getPreferredVoice(voices) {
+        if (preferredVoiceCache) return preferredVoiceCache;
+        if (!voices || !voices.length) return null;
+        // Use whatever the platform itself marks as its default TTS voice --
+        // this is literally Siri's voice on iOS Safari, or the native Google
+        // voice on Android Chrome, rather than us guessing at a specific named
+        // voice and risking a robotic-sounding pick.
+        const enVoices = voices.filter(v => /^en/i.test(v.lang));
+        const match = voices.find(v => v.default) || enVoices[0] || voices[0] || null;
+        preferredVoiceCache = match;
+        return preferredVoiceCache;
+    }
+
+    function speakText(text, onEnd) {
+        window.speechSynthesis.cancel();
+        ensureVoicesLoaded().then(voices => {
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voice = getPreferredVoice(voices);
+            if (voice) utterance.voice = voice;
+            utterance.pitch = 1;
+            utterance.rate = 1;
+            utterance.onend = onEnd;
+            utterance.onerror = onEnd;
+            window.speechSynthesis.speak(utterance);
+        });
+    }
+
+    function speakSentenceChunk() {
+        if (!aiVoiceFlow) return;
+        aiVoiceFlow.mode = 'speaking';
+        const chunk = aiVoiceFlow.sentences.slice(aiVoiceFlow.idx, aiVoiceFlow.idx + 2).join(' ');
+        aiVoiceFlow.idx += 2;
+        renderAiVoiceStatusBanner(`Speaking message from ${aiVoiceFlow.peer}…`);
+        speakText(chunk, () => advanceAiVoiceFlow('chunk_done'));
+    }
+
+    function advanceAiVoiceFlow(event) {
+        if (!aiVoiceFlow) return;
+        if (event === 'chunk_done') {
+            if (aiVoiceFlow.idx < aiVoiceFlow.sentences.length) {
+                aiVoiceFlow.mode = 'awaiting_more_yn';
+                renderAiVoiceStatusBanner('Listening — say yes or no…');
+                speakText('Do you want to hear more?', () => {
+                    listenForYesNo(
+                        () => { if (aiVoiceFlow) speakSentenceChunk(); },
+                        () => { if (aiVoiceFlow) askToReply(); }
+                    );
+                });
+            } else {
+                askToReply();
+            }
+        }
+    }
+
+    function askToReply() {
+        if (!aiVoiceFlow) return;
+        aiVoiceFlow.mode = 'awaiting_reply_yn';
+        if (!isAiVoiceModeSupportedForReply()) { cancelAiVoiceFlow(); return; }
+        renderAiVoiceStatusBanner('Listening — say yes or no…');
+        speakText('Do you want to reply?', () => {
+            listenForYesNo(
+                () => { if (aiVoiceFlow) listenForReplyText(); },
+                () => cancelAiVoiceFlow()
+            );
+        });
+    }
+
+    function createSpeechRecognition() {
+        const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionCtor) return null;
+        const recognition = new SpeechRecognitionCtor();
+        recognition.lang = document.documentElement.lang || 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+        return recognition;
+    }
+
+    function listenForYesNo(onYes, onNo) {
+        if (!aiVoiceFlow) return;
+        const recognition = createSpeechRecognition();
+        if (!recognition) { onNo(); return; }
+        aiVoiceFlow.recognition = recognition;
+        let handled = false;
+        recognition.onresult = (e) => {
+            handled = true;
+            const transcript = (e.results[0][0].transcript || '').toLowerCase();
+            if (/\b(yes|yeah|yep|sure|okay)\b/.test(transcript)) onYes(); else onNo();
+        };
+        recognition.onerror = () => { if (!handled) { handled = true; onNo(); } };
+        recognition.onend = () => { if (!handled) { handled = true; onNo(); } };
+        try { recognition.start(); } catch (e) { onNo(); }
+    }
+
+    function listenForReplyText() {
+        if (!aiVoiceFlow) return;
+        aiVoiceFlow.mode = 'listening_reply';
+        const recognition = createSpeechRecognition();
+        if (!recognition) { cancelAiVoiceFlow(); return; }
+        aiVoiceFlow.recognition = recognition;
+        renderAiVoiceStatusBanner('Listening for your reply…');
+        let handled = false;
+        recognition.onresult = (e) => {
+            handled = true;
+            const transcript = e.results[0][0].transcript || '';
+            const input = document.getElementById('messageInput');
+            if (input) {
+                input.value = transcript;
+                input.focus();
+            }
+            cancelAiVoiceFlow();
+        };
+        recognition.onerror = () => { if (!handled) { handled = true; cancelAiVoiceFlow(); } };
+        recognition.onend = () => { if (!handled) { handled = true; cancelAiVoiceFlow(); } };
+        try { recognition.start(); } catch (e) { cancelAiVoiceFlow(); }
+    }
+
+    /* SIRI-STYLE WAVE SHADER — raw WebGL, no library. Ported verbatim (GLSL is
+       framework-agnostic) from a React/shadcn "siri-wave" component the user
+       wanted for the voice button's look; this app has no build step/React/
+       Tailwind, so only the shader + a plain canvas driver were ported, not the
+       component wrapper. */
+    const SIRI_WAVE_VERTEX_SHADER = `attribute vec2 aPos; void main(){ gl_Position=vec4(aPos,0.0,1.0); }`;
+    const SIRI_WAVE_FRAGMENT_SHADER = `precision highp float;
+uniform vec2 iResolution; uniform float iTime;
+const float PI = 3.14159265359;
+const float AMPLITUDE   = 0.32;
+const float FREQ        = 1.1;
+const float ABER_FREQ   = 1.0;
+const float SPEED       = 2.4;
+const float WAVE_SCALE  = 0.6;
+const float ABERRATION  = 2.6;
+const float THICKNESS   = 3.0;
+const float INTENSITY   = 2.;
+const float FALLOFF     = 1.7;
+const float EDGE_MASK   = 0.4;
+const float EDGE_INSET  = 0.0;
+const float BAND_FILL   = 30000.0;
+const float BAND_THICK  = 0.08;
+const float SOFTNESS    = 2.5;
+const float LOW_AMP     = 6.0;
+const float LOW_INT     = 1.5;
+const float MID_ABER    = 0.8;
+const float MID_ABAMP   = 0.05;
+const float MID_BAND    = 20.0;
+const float MID_SOFT    = 0.4;
+const float HIGH_ABER   = 0.5;
+const float HIGH_ABAMP  = 0.06;
+const float RESOLVED    = 1.0;
+const float UNRES_SCALE = 0.14;
+
+vec3 spectral4(int s){
+    float x = float(s);
+    return clamp(vec3(abs(x-3.0)-1.0, 2.0-abs(x-2.0), 2.0-abs(x-4.0)), 0.0, 1.0);
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord){
+    vec2 R = iResolution.xy;
+    float aspect = R.x / R.y;
+    vec2 p = (fragCoord + 0.5) * 2.0 / R - 1.0;
+    p.x *= aspect;
+    float yScreen = p.y;
+    p /= max(WAVE_SCALE, 0.1);
+
+    float t   = iTime;
+    float low  = clamp(0.45 + 0.45*sin(t*0.8)*sin(t*0.37+1.0), 0.0, 1.0);
+    float mid  = clamp(0.40 + 0.40*sin(t*1.7+2.0)*sin(t*0.53), 0.0, 1.0);
+    float high = clamp(0.30 + 0.30*sin(t*2.9+4.0)*sin(t*0.71+2.0), 0.0, 1.0);
+
+    float res   = clamp(RESOLVED, 0.0, 1.0);
+    float drift = mod(t, 20.0*PI) * SPEED;
+
+    float xN  = p.x / max(aspect, 1.0);
+    float env = cos(PI*0.5 * min(abs(0.9*xN), 1.0));
+    env *= env;
+
+    float A1    = AMPLITUDE + 0.01*low*LOW_AMP;
+    float A2    = A1 + mid*MID_ABAMP + high*HIGH_ABAMP;
+    float AB    = (ABERRATION + mid*MID_ABER + high*HIGH_ABER)*res;
+    float th    = mix(0.1, 0.01*THICKNESS, res);
+    float inten = mix(0.1, 0.01*(INTENSITY + low*LOW_INT), res);
+    float soft  = 0.01*res*max(0.0, SOFTNESS + mid*MID_SOFT);
+
+    float dUnres = max(length(p) - mix(0.14, UNRES_SCALE, res), 0.0);
+    float yMain = A1 * env * res * sin(p.x*FREQ + drift);
+
+    float bandFillTh = max(BAND_THICK, 1e-4);
+    float bandAmt    = 1e-4 * BAND_FILL * inten;
+    vec3 num = vec3(0.0), den = vec3(0.0);
+    for(int s = 0; s < 4; s++){
+        vec3 hue = mix(vec3(1.0), spectral4(s), res);
+        den += hue;
+        float ab = mix(-AB, AB, float(s)/3.0);
+        float yL = A2 * env * res * sin(p.x*ABER_FREQ + drift + ab);
+        float d   = mix(dUnres, abs(p.y - yL), res);
+        float lor = mix(1.0/(1.0 + (0.02*d)*(0.02*d)), 1.0, res);
+        float line = inten / (sqrt(d*d + soft*soft) + th);
+        float lo = min(yMain, yL), hi = max(yMain, yL);
+        float dBand = max(0.0, max(p.y - hi, lo - p.y));
+        float band  = bandAmt / (dBand + bandFillTh);
+        num += hue * lor * (line + band);
+    }
+    vec3 col = num / den;
+
+    float dM    = mix(dUnres, abs(p.y - yMain), res);
+    float lorM  = mix(1.0/(1.0 + (0.02*dM)*(0.02*dM)), 1.0, res);
+    float boost = (1.0 - res) * (14.0*low + 4.0);
+    col += 0.5 * inten * (lorM + boost) / (sqrt(dM*dM + soft*soft) + th);
+
+    col = pow(max(col, 0.0), vec3(1.5));
+    float emT = clamp((abs(yScreen) - 1.0 + EDGE_INSET) / (-max(EDGE_MASK, 1e-4)), 0.0, 1.0);
+    float em  = emT*emT*(3.0 - 2.0*emT);
+    float gauss = exp(-pow(xN*FALLOFF, 2.0));
+    col *= mix(1.0, em*gauss, res);
+    col *= res;
+    fragColor = vec4(col, 1.0);
+}
+// Wrapper only (mainImage's original art is untouched) -- derives alpha from
+// brightness so the shader's black "background" composites as transparent
+// instead of a solid black square, per request to show just the animation.
+void main(){
+    vec4 c;
+    mainImage(c, gl_FragCoord.xy);
+    float alpha = clamp(max(max(c.r, c.g), c.b), 0.0, 1.0);
+    gl_FragColor = vec4(c.rgb, alpha);
+}`;
+
+    let siriWaveHandle = null;
+
+    function initSiriWaveButton() {
+        if (siriWaveHandle) return; // already running
+        const canvas = document.getElementById('globalVoiceCanvas');
+        const fallbackIcon = document.getElementById('globalVoiceFallbackIcon');
+        if (!canvas) return;
+        const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false });
+        if (!gl) return; // leave the mic icon fallback visible
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+        function compile(type, src) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, src);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('siri-wave shader compile error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+        const vs = compile(gl.VERTEX_SHADER, SIRI_WAVE_VERTEX_SHADER);
+        const fs = compile(gl.FRAGMENT_SHADER, SIRI_WAVE_FRAGMENT_SHADER);
+        if (!vs || !fs) return;
+        const program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+        const aPos = gl.getAttribLocation(program, 'aPos');
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+        const uResolution = gl.getUniformLocation(program, 'iResolution');
+        const uTime = gl.getUniformLocation(program, 'iTime');
+
+        const dim = canvas.width; // 52, set in markup
+        gl.viewport(0, 0, dim, dim);
+
+        let raf = 0;
+        let lastFrameAt = performance.now();
+        let shaderTime = 0;
+        function frame() {
+            const now = performance.now();
+            const dt = (now - lastFrameAt) / 1000;
+            lastFrameAt = now;
+            // Double speed while listening -- makes the wave itself visibly more
+            // energetic when voice control is on, not just the button's CSS pulse.
+            const speedMultiplier = (globalVoiceControl && globalVoiceControl.shouldRestart) ? 2.0 : 1.0;
+            shaderTime += dt * speedMultiplier;
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.uniform2f(uResolution, dim, dim);
+            gl.uniform1f(uTime, shaderTime);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            raf = requestAnimationFrame(frame);
+        }
+        frame();
+
+        canvas.style.display = 'block';
+        if (fallbackIcon) fallbackIcon.style.display = 'none';
+        siriWaveHandle = {
+            stop() {
+                cancelAnimationFrame(raf);
+                gl.deleteProgram(program);
+                gl.deleteShader(vs);
+                gl.deleteShader(fs);
+                gl.deleteBuffer(buffer);
+            }
+        };
+    }
+
+    /* GLOBAL VOICE CONTROL — a Siri-like always-listening command layer, distinct
+       from the per-chat AI Voice Mode above. Started/stopped via the floating
+       #globalVoiceControlBtn (mic permission needs one real user gesture; true
+       voice-only cold start isn't possible) and kept alive by restarting the
+       recognizer every time the browser's own session ends, until the user says
+       "stop voice command" or taps the button off. */
+    let globalVoiceControl = null; // null when off, else { recognition, shouldRestart, silenceTimer, awaitingSend }
+
+    function syncGlobalVoiceBtn() {
+        const btn = document.getElementById('globalVoiceControlBtn');
+        if (btn) btn.classList.toggle('listening', !!(globalVoiceControl && globalVoiceControl.shouldRestart));
+    }
+
+    function toggleGlobalVoiceControl() {
+        if (globalVoiceControl && globalVoiceControl.shouldRestart) stopGlobalVoiceControl();
+        else startGlobalVoiceControl();
+    }
+
+    function startGlobalVoiceControl() {
+        if (globalVoiceControl && globalVoiceControl.shouldRestart) return;
+        if (!isAiVoiceModeSupportedForReply()) { showToast('Voice control needs a browser with speech recognition support.', 'error'); return; }
+        unlockSpeechSynthesisForMobile();
+        if (aiVoiceFlow) cancelAiVoiceFlow(); // global mode takes precedence over the per-chat reactive flow
+        globalVoiceControl = { recognition: null, shouldRestart: true, silenceTimer: null, awaitingSend: null };
+        syncGlobalVoiceBtn();
+        startGlobalRecognitionCycle();
+        resetVoiceSilenceTimer();
+    }
+
+    function stopGlobalVoiceControl() {
+        if (!globalVoiceControl) return;
+        globalVoiceControl.shouldRestart = false;
+        try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+        if (globalVoiceControl.silenceTimer) clearTimeout(globalVoiceControl.silenceTimer);
+        if (globalVoiceControl.recognition) {
+            try {
+                globalVoiceControl.recognition.onresult = null;
+                globalVoiceControl.recognition.onerror = null;
+                globalVoiceControl.recognition.onend = null;
+                globalVoiceControl.recognition.stop();
+            } catch (e) {}
+        }
+        globalVoiceControl = null;
+        syncGlobalVoiceBtn();
+    }
+
+    function createContinuousSpeechRecognition() {
+        const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionCtor) return null;
+        const recognition = new SpeechRecognitionCtor();
+        recognition.lang = document.documentElement.lang || 'en-US';
+        recognition.maxAlternatives = 1;
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        return recognition;
+    }
+
+    function startGlobalRecognitionCycle() {
+        if (!globalVoiceControl || !globalVoiceControl.shouldRestart) return;
+        const recognition = createContinuousSpeechRecognition();
+        if (!recognition) { stopGlobalVoiceControl(); return; }
+        globalVoiceControl.recognition = recognition;
+
+        recognition.onresult = (e) => {
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) {
+                    const transcript = (e.results[i][0].transcript || '').trim();
+                    if (transcript) dispatchVoiceCommand(transcript);
+                }
+            }
+        };
+        recognition.onerror = (e) => {
+            if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                showToast('Microphone access was denied.', 'error');
+                stopGlobalVoiceControl();
+            }
+            // benign errors (no-speech, aborted, network hiccups) fall through to onend's restart
+        };
+        recognition.onend = () => {
+            if (globalVoiceControl && globalVoiceControl.shouldRestart) {
+                setTimeout(() => startGlobalRecognitionCycle(), 250);
+            }
+        };
+        try { recognition.start(); } catch (e) {
+            if (globalVoiceControl && globalVoiceControl.shouldRestart) setTimeout(() => startGlobalRecognitionCycle(), 250);
+        }
+    }
+
+    function resetVoiceSilenceTimer() {
+        if (!globalVoiceControl) return;
+        if (globalVoiceControl.silenceTimer) clearTimeout(globalVoiceControl.silenceTimer);
+        globalVoiceControl.silenceTimer = setTimeout(() => {
+            if (globalVoiceControl && globalVoiceControl.shouldRestart) speakText('Anything else?');
+        }, 6000);
+    }
+
+    // Spoken name -> username. No display-name index exists elsewhere in the app
+    // (search only matches usernames) so this builds one on the fly from known
+    // contacts each time it's called -- fine at this contact-list scale.
+    function resolveContactByName(spokenName) {
+        const needle = (spokenName || '').trim().toLowerCase();
+        if (!needle) return null;
+        const candidates = new Set([...Object.keys(conversationHistory), ...friendsSet]);
+        let substringMatch = null;
+        for (const username of candidates) {
+            const profile = getKnownProfile(username) || {};
+            const first = (profile.firstName || '').toLowerCase();
+            const last = (profile.lastName || '').toLowerCase();
+            const full = `${first} ${last}`.trim();
+            const uname = username.toLowerCase();
+            if (needle === uname || needle === first || needle === last || needle === full) return username;
+            if (!substringMatch && (uname.includes(needle) || first.includes(needle) || full.includes(needle))) {
+                substringMatch = username;
+            }
+        }
+        return substringMatch;
+    }
+
+    function dispatchVoiceCommand(transcript) {
+        const text = transcript.trim();
+        const lower = text.toLowerCase();
+
+        if (/^stop(?: listening| voice control| voice command)?$/.test(lower)) return handleVoiceStop();
+        if (/^start(?: listening| voice control| voice command)?$/.test(lower)) return handleVoiceStart();
+        if (/^cancel$/.test(lower)) return handleVoiceCancel();
+
+        let m;
+        if ((m = lower.match(/^send\s+(.+?)\s+to\s+(.+)$/))) return handleVoiceSendWithText(m[1], m[2]);
+        if (/^send(?: it| message)?$/.test(lower)) return handleVoiceSend();
+        if ((m = lower.match(/^(?:open|go to|switch to)(?: chat with| the chat with)?\s+(.+)$/))) return handleVoiceOpen(m[1]);
+        if ((m = lower.match(/^find messages about\s+(.+)$/))) return handleVoiceTopicSearch(m[1]);
+        if ((m = lower.match(/^what did (?:we|.+?) (?:talk|say|discuss) about\s+(.+)$/))) return handleVoiceTopicSearch(m[1]);
+        if ((m = lower.match(/^(?:search|find)(?: for)?\s+(.+)$/))) return handleVoiceSearch(m[1]);
+        if ((m = text.match(/^(?:write|compose|type)\s+(.+)$/i))) return handleVoiceWrite(m[1]);
+
+        speakText("Sorry, I didn't catch a command.");
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceOpen(name) {
+        const username = resolveContactByName(name);
+        if (!username) {
+            speakText(`I couldn't find a contact named ${name}.`);
+        } else {
+            switchConversationRoom(username);
+            speakText(`Opened chat with ${username}.`);
+        }
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceSearch(query) {
+        openUniversalSearch();
+        const input = document.getElementById('universalSearchInput');
+        if (input) input.value = query;
+        runUniversalSearch(query);
+        speakText(`Searching for ${query}.`);
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceWrite(text) {
+        if (!currentActiveUser) {
+            speakText('No chat is open. Say open, then a contact name, first.');
+            resetVoiceSilenceTimer();
+            return;
+        }
+        const input = document.getElementById('messageInput');
+        if (input) input.value = text;
+        globalVoiceControl.awaitingSend = text;
+        speakText('Ready. Say send to send it, or cancel.');
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceSendWithText(text, name) {
+        const username = resolveContactByName(name);
+        if (!username) {
+            speakText(`I couldn't find a contact named ${name}.`);
+            resetVoiceSilenceTimer();
+            return;
+        }
+        switchConversationRoom(username);
+        const input = document.getElementById('messageInput');
+        if (input) input.value = text;
+        sendPrivateMessage();
+        globalVoiceControl.awaitingSend = null;
+        speakText(`Sent to ${username}.`);
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceSend() {
+        const input = document.getElementById('messageInput');
+        if (!input || !input.value.trim()) {
+            speakText('There is nothing to send.');
+            resetVoiceSilenceTimer();
+            return;
+        }
+        sendPrivateMessage();
+        globalVoiceControl.awaitingSend = null;
+        speakText('Sent.');
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceCancel() {
+        const input = document.getElementById('messageInput');
+        if (input) input.value = '';
+        globalVoiceControl.awaitingSend = null;
+        speakText('Cancelled.');
+        resetVoiceSilenceTimer();
+    }
+
+    function handleVoiceStop() {
+        stopGlobalVoiceControl();
+    }
+
+    function handleVoiceStart() {
+        speakText('Already listening.');
+        resetVoiceSilenceTimer();
+    }
+
+    /* SEMANTIC TOPIC SEARCH — "find messages about X" within the currently open
+       chat. Runs entirely client-side (a small sentence-embedding model loaded
+       from a CDN and executed via WebAssembly) so message content never leaves
+       the browser -- consistent with this app's end-to-end encryption promise.
+       No server involvement, no persistence of embeddings. */
+    let semanticSearchPipelinePromise = null;
+
+    function ensureSemanticSearchReady() {
+        if (!semanticSearchPipelinePromise) {
+            showToast('Loading semantic search…', 'info');
+            speakText('Loading semantic search, one moment.');
+            semanticSearchPipelinePromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/+esm')
+                .then(({ pipeline }) => pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2'));
+        }
+        return semanticSearchPipelinePromise;
+    }
+
+    async function embedText(extractor, text) {
+        const output = await extractor(text, { pooling: 'mean', normalize: true });
+        return Array.from(output.data);
+    }
+
+    function cosineSimilarity(a, b) {
+        let dot = 0;
+        for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+        return dot; // vectors are already normalized, so dot product == cosine similarity
+    }
+
+    async function runSemanticMessageSearch(topic) {
+        if (!currentActiveUser) {
+            speakText('Open a chat first, then ask about a topic.');
+            resetVoiceSilenceTimer();
+            return null;
+        }
+        const thread = conversationHistory[currentActiveUser] || [];
+        const candidates = thread.filter(m => typeof m.text === 'string' && m.text && !m.media);
+        if (!candidates.length) {
+            return { topic, results: [] };
+        }
+
+        let extractor;
+        try {
+            extractor = await ensureSemanticSearchReady();
+        } catch (e) {
+            speakText('Semantic search failed to load.');
+            resetVoiceSilenceTimer();
+            return null;
+        }
+
+        const topicVec = await embedText(extractor, topic);
+        const scored = [];
+        for (const msg of candidates) {
+            const vec = await embedText(extractor, msg.text);
+            const score = cosineSimilarity(topicVec, vec);
+            if (score >= 0.35) scored.push({ username: currentActiveUser, msg, score });
+        }
+        scored.sort((a, b) => b.score - a.score);
+        return { topic, results: scored.slice(0, 5) };
+    }
+
+    function renderSemanticSearchResults(topic, results) {
+        openUniversalSearch();
+        const container = document.getElementById('universalSearchResults');
+        if (!container) return;
+        let html = `<div class="search-result-section-title">Related to "${escapeSearchHtml(topic)}"</div>`;
+        if (!results.length) {
+            html += `<div class="search-result-row" style="cursor:default;"><div class="search-result-body"><div class="search-result-title">No related messages found</div></div></div>`;
+        } else {
+            results.forEach(({ username, msg }) => {
+                const data = getKnownProfile(username);
+                const avatarStyle = (data && data.avatar) ? `background-image:url('${data.avatar}');` : '';
+                const avatarInitial = (data && data.avatar) ? '' : username.charAt(0).toUpperCase();
+                html += `
+                    <div class="search-result-row" onclick="jumpToSearchResultMessage('${username}', '${msg.id}')">
+                        <div class="search-result-icon" style="${avatarStyle}">${avatarInitial}</div>
+                        <div class="search-result-body">
+                            <div class="search-result-title">${escapeSearchHtml(msg.text).slice(0, 120)}</div>
+                            <div class="search-result-subtitle">${username}</div>
+                        </div>
+                    </div>`;
+            });
+        }
+        container.innerHTML = html;
+    }
+
+    async function handleVoiceTopicSearch(topic) {
+        const outcome = await runSemanticMessageSearch(topic);
+        if (!outcome) return; // already spoke an error/guard message
+        renderSemanticSearchResults(outcome.topic, outcome.results);
+        speakText(outcome.results.length
+            ? `Found ${outcome.results.length} message${outcome.results.length === 1 ? '' : 's'} about that.`
+            : "Couldn't find anything about that in this chat.");
+        resetVoiceSilenceTimer();
     }
 
     async function loadEncryptionFingerprint(username) {
@@ -8147,6 +9095,7 @@
             authSubtitle.innerText = "Sign up to register your credentials with encrypted verification.";
             authSwitchFooter.innerHTML = `Already have an account? <span style="color: var(--accent-brand); cursor: pointer; font-weight: 600;" onclick="switchAuthMode('login')">Log In</span>`;
             document.getElementById('forgotPasswordLink').style.display = 'none';
+            document.getElementById('termsConsentRow').style.display = 'flex';
         } else {
             signupFields.style.display = 'none';
             identityLabel.innerText = "Username or Email";
@@ -8156,6 +9105,7 @@
             authSubtitle.innerText = "Log in to unlock your local encrypted session vault.";
             authSwitchFooter.innerHTML = `Don't have an account? <span style="color: var(--accent-brand); cursor: pointer; font-weight: 600;" onclick="switchAuthMode('signup')">Sign Up</span>`;
             document.getElementById('forgotPasswordLink').style.display = 'block';
+            document.getElementById('termsConsentRow').style.display = 'none';
         }
 
         document.getElementById('authStep1').style.display = 'block';
@@ -8268,6 +9218,7 @@
             if (!firstName || !lastName) return showToast("❌ Please enter both first name and last name.", 'error');
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity)) return showToast("❌ Please enter a valid email address.", 'error');
             if (password.length < 8) return showToast("❌ Password must be at least 8 characters.", 'error');
+            if (!document.getElementById('termsConsentCheckbox').checked) return showToast("❌ Please agree to the Terms of Service and Privacy Policy.", 'error');
 
             submitBtn.disabled = true;
             try {
@@ -8561,6 +9512,8 @@
                     document.getElementById('sidebarPanel').style.display = 'flex';
                     document.getElementById('chatPanel').style.display = 'flex';
                     document.getElementById('statusFabWrap').style.display = 'flex';
+                    document.getElementById('globalVoiceControlBtn').style.display = 'flex';
+                    initSiriWaveButton();
                     document.getElementById('myHandleDisplay').innerText = "@" + myUsername;
                     document.getElementById('chatPanel').classList.add('no-active-chat');
                     // Both panels were display:none until just now, so neither had a
@@ -9104,6 +10057,8 @@
     function closeSecureTunnel() {
         // Fire-and-forget: clear the httpOnly cookie server-side. The UI transitions
         // to login immediately regardless of the response.
+        if (aiVoiceFlow) cancelAiVoiceFlow();
+        if (globalVoiceControl) stopGlobalVoiceControl();
         fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
         if (socket) {
             socket.disconnect();
@@ -9124,6 +10079,8 @@
         document.getElementById('chatPanel').style.display = 'none';
         collapseStatusFab();
         document.getElementById('statusFabWrap').style.display = 'none';
+        document.getElementById('globalVoiceControlBtn').style.display = 'none';
+        if (siriWaveHandle) { siriWaveHandle.stop(); siriWaveHandle = null; }
         document.getElementById('setup').style.display = 'flex';
     }
 
@@ -10692,7 +11649,7 @@
     async function manageGroupInviteLink(groupId) {
         try {
             const result = await authFetchJSON(`/api/groups/${groupId}/invite`, 'POST', {});
-            const link = `${window.location.origin}/?joinGroup=${result.code}`;
+            const link = `${window.location.origin}/index.html?joinGroup=${result.code}`;
             if (navigator.clipboard) {
                 await navigator.clipboard.writeText(link).catch(() => {});
             }
@@ -10700,9 +11657,9 @@
         } catch (err) { showToast(err.message, 'error'); }
     }
 
-    /* Reached via a link like /?joinGroup=<code> -- redeemed once the user is
-       authenticated (right after startChatSession() finishes loading everything
-       else), not as a public unauthenticated route. */
+    /* Reached via a link like /index.html?joinGroup=<code> -- redeemed once the
+       user is authenticated (right after startChatSession() finishes loading
+       everything else), not as a public unauthenticated route. */
     async function tryJoinGroupFromUrl() {
         const params = new URLSearchParams(window.location.search);
         const code = params.get('joinGroup');
@@ -11111,7 +12068,6 @@
         renderStorageBreakdown();
         renderFontSizeButtons();
         renderChatLockStatus();
-        setAppTheme(localStorage.getItem('hai_theme') || 'light', true);
     }
     function closeSettingsModal() {
         closeAuxPanel();
@@ -11235,18 +12191,11 @@
         }
     }
 
-    /* THEME */
+    /* THEME -- black/dark is the only theme now; no light mode, no user toggle.
+       Kept as a named function (rather than inlining the attribute set) since
+       applyRemoteThemeColors() still needs to run after it either way. */
     function applyStoredTheme() {
-        const stored = localStorage.getItem('hai_theme') || 'light';
-        document.documentElement.setAttribute('data-theme', stored);
-    }
-    function setAppTheme(mode, skipSave) {
-        document.documentElement.setAttribute('data-theme', mode);
-        if (!skipSave) localStorage.setItem('hai_theme', mode);
-        const lightBtn = document.getElementById('themeBtn-light');
-        const darkBtn = document.getElementById('themeBtn-dark');
-        if (lightBtn) lightBtn.classList.toggle('active', mode === 'light');
-        if (darkBtn) darkBtn.classList.toggle('active', mode === 'dark');
+        document.documentElement.setAttribute('data-theme', 'dark');
         applyRemoteThemeColors();
     }
 
@@ -12037,7 +12986,6 @@
         { label: 'Disappearing Messages', tab: 'privacy', keywords: 'disappearing messages timer auto delete privacy' },
         { label: 'Notification Sound', tab: 'notifications', keywords: 'sound tone notification alert' },
         { label: 'Enter Is Send', tab: 'chats', keywords: 'enter key send message keyboard' },
-        { label: 'Theme', tab: 'chats', keywords: 'dark light theme appearance mode' },
         { label: 'Font Size', tab: 'chats', keywords: 'font size text size chats' },
         { label: 'Storage Used', tab: 'storage', keywords: 'storage data usage space' },
         { label: 'Storage by Chat', tab: 'storage', keywords: 'storage breakdown chat data usage' },
@@ -12538,8 +13486,17 @@
        indicators), not persisted or queued for offline delivery: a stale invite/move
        replayed minutes later wouldn't make sense. First draft covering four games —
        intentionally simple rulesets, easy to extend. */
-    const GAME_NAMES = { tictactoe: 'Tic Tac Toe', rps: 'Stone Paper Scissors', truthdare: 'Truth or Dare' };
-    const GAME_ACCENTS = { tictactoe: 'var(--accent-brand)', rps: 'var(--accent-brand)', truthdare: 'var(--accent-brand)' };
+    const GAME_NAMES = {
+        tictactoe: 'Tic Tac Toe', rps: 'Stone Paper Scissors', truthdare: 'Truth or Dare',
+        connect4: 'Connect Four', wordchain: 'Word Chain', hangman: 'Hangman',
+        wyr: 'Would You Rather', twentyq: '20 Questions', emojicharades: 'Emoji Charades',
+        trivia: 'Trivia Quiz', dotsboxes: 'Dots and Boxes',
+    };
+    const GAME_ACCENTS = { tictactoe: 'var(--accent-brand)', rps: 'var(--accent-brand)', truthdare: 'var(--accent-brand)',
+        connect4: 'var(--accent-brand)', wordchain: 'var(--accent-brand)', hangman: 'var(--accent-brand)',
+        wyr: 'var(--accent-brand)', twentyq: 'var(--accent-brand)', emojicharades: 'var(--accent-brand)',
+        trivia: 'var(--accent-brand)', dotsboxes: 'var(--accent-brand)',
+    };
     let activeGame = null;
     let pendingGameInvite = null;
 
@@ -12594,6 +13551,7 @@
         } else if (payload.action === 'accept') {
             activeGame.status = 'playing';
             initGameState();
+            hostPushInitialGameData();
         } else if (payload.action === 'move') {
             applyOpponentMove(payload);
         } else if (payload.action === 'reset') {
@@ -12637,6 +13595,38 @@
         if (g.board.every(c => c)) g.winner = 'draw';
     }
 
+    // Connect Four's board isn't square and the win length (4) differs from the
+    // board dimensions, so it gets its own direct check rather than reusing
+    // computeWinLines (which assumes a square NxN board).
+    function connect4LowestEmptyRow(g, col) {
+        for (let r = g.rows - 1; r >= 0; r--) {
+            if (!g.board[r * g.cols + col]) return r;
+        }
+        return -1;
+    }
+    function checkConnect4Winner() {
+        const g = activeGame;
+        const { rows, cols, board } = g;
+        const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const sym = board[r * cols + c];
+                if (!sym) continue;
+                for (const [dr, dc] of dirs) {
+                    const cells = [r * cols + c];
+                    let ok = true;
+                    for (let k = 1; k < 4; k++) {
+                        const rr = r + dr * k, cc = c + dc * k;
+                        if (rr < 0 || rr >= rows || cc < 0 || cc >= cols || board[rr * cols + cc] !== sym) { ok = false; break; }
+                        cells.push(rr * cols + cc);
+                    }
+                    if (ok) { g.winner = sym; g.winningLine = cells; return; }
+                }
+            }
+        }
+        if (board.every(c => c)) g.winner = 'draw';
+    }
+
     const TRUTH_PROMPTS = [
         "What's the most embarrassing thing you've ever done?",
         "What's a secret you've never told anyone here?",
@@ -12656,6 +13646,39 @@
         "Send the 5th photo in your gallery.",
         "Reply using only emojis for the next 2 minutes.",
         "Do 10 jumping jacks and send a photo as proof."
+    ];
+
+    const WYR_PROMPTS = [
+        { a: 'Always be 10 minutes late', b: 'Always be an hour early' },
+        { a: 'Have unlimited pizza for life', b: 'Have unlimited tacos for life' },
+        { a: 'Be able to fly', b: 'Be able to turn invisible' },
+        { a: 'Live without music', b: 'Live without movies' },
+        { a: 'Always know when someone is lying', b: 'Always get away with lying' },
+        { a: 'Give up your phone for a month', b: 'Give up your bed for a month' },
+        { a: 'Have a rewind button for your life', b: 'Have a pause button for your life' },
+        { a: 'Be famous but broke', b: 'Be rich but unknown' },
+        { a: 'Never use social media again', b: 'Never watch another movie or show again' },
+        { a: 'Only be able to whisper', b: 'Only be able to shout' },
+        { a: 'Read minds', b: 'See 10 minutes into the future' },
+        { a: 'Live in the mountains', b: 'Live at the beach' },
+        { a: 'Have no internet for a week', b: 'Have no AC or heating for a week' },
+        { a: 'Be the funniest person in the room', b: 'Be the smartest person in the room' },
+        { a: 'Time travel to the past', b: 'Time travel to the future' },
+    ];
+
+    const TRIVIA_QUESTIONS = [
+        { q: 'What is the largest planet in our solar system?', choices: ['Earth', 'Jupiter', 'Saturn', 'Mars'], correctIdx: 1 },
+        { q: 'What is the capital of Japan?', choices: ['Seoul', 'Beijing', 'Tokyo', 'Bangkok'], correctIdx: 2 },
+        { q: 'How many continents are there?', choices: ['5', '6', '7', '8'], correctIdx: 2 },
+        { q: 'What is the chemical symbol for gold?', choices: ['Go', 'Gd', 'Au', 'Ag'], correctIdx: 2 },
+        { q: 'Which ocean is the largest?', choices: ['Atlantic', 'Indian', 'Arctic', 'Pacific'], correctIdx: 3 },
+        { q: 'Who wrote "Romeo and Juliet"?', choices: ['Charles Dickens', 'William Shakespeare', 'Mark Twain', 'Jane Austen'], correctIdx: 1 },
+        { q: 'What is the smallest prime number?', choices: ['0', '1', '2', '3'], correctIdx: 2 },
+        { q: 'Which animal is known as the King of the Jungle?', choices: ['Tiger', 'Elephant', 'Lion', 'Gorilla'], correctIdx: 2 },
+        { q: 'How many strings does a standard guitar have?', choices: ['4', '5', '6', '7'], correctIdx: 2 },
+        { q: 'What gas do plants absorb from the atmosphere?', choices: ['Oxygen', 'Carbon Dioxide', 'Nitrogen', 'Hydrogen'], correctIdx: 1 },
+        { q: 'What is the fastest land animal?', choices: ['Lion', 'Cheetah', 'Horse', 'Greyhound'], correctIdx: 1 },
+        { q: 'Which planet is known as the Red Planet?', choices: ['Venus', 'Jupiter', 'Mars', 'Mercury'], correctIdx: 2 },
     ];
 
     function initGameState() {
@@ -12679,6 +13702,75 @@
             g.myTurn = g.isHost;
             g.awaitingResponse = false;
             g.log = [];
+        } else if (g.type === 'connect4') {
+            g.rows = 6;
+            g.cols = 7;
+            g.board = new Array(g.rows * g.cols).fill(null);
+            g.mySymbol = g.isHost ? 'r' : 'y';
+            g.oppSymbol = g.isHost ? 'y' : 'r';
+            g.myTurn = g.isHost;
+            g.winner = null;
+            g.winningLine = null;
+        } else if (g.type === 'wordchain') {
+            g.words = [];
+            g.usedWords = [];
+            g.myTurn = g.isHost;
+        } else if (g.type === 'hangman') {
+            g.isSetter = g.isHost;
+            g.phase = g.isHost ? 'setting' : 'waiting';
+            g.secretWord = null;
+            g.guessedLetters = [];
+            g.wrongCount = 0;
+            g.maxWrong = 6;
+            g.winner = null;
+        } else if (g.type === 'wyr') {
+            g.promptIndex = g.isHost ? Math.floor(Math.random() * WYR_PROMPTS.length) : null;
+            g.myChoice = null;
+            g.oppChoice = null;
+            g.revealed = false;
+        } else if (g.type === 'twentyq') {
+            g.isThinker = g.isHost;
+            g.log = [];
+            g.questionCount = 0;
+            g.phase = 'playing';
+            g.winner = null;
+        } else if (g.type === 'emojicharades') {
+            g.isClueGiver = g.isHost;
+            g.phase = g.isHost ? 'clueing' : 'waiting';
+            g.clue = '';
+            g.log = [];
+            g.winner = null;
+        } else if (g.type === 'trivia') {
+            g.qIndex = g.isHost ? 0 : null;
+            g.myAnswer = null;
+            g.oppAnswer = null;
+            g.myScore = 0;
+            g.oppScore = 0;
+            g.revealed = false;
+        } else if (g.type === 'dotsboxes') {
+            g.rows = 3;
+            g.cols = 3;
+            g.hEdges = new Array((g.rows + 1) * g.cols).fill(null);
+            g.vEdges = new Array(g.rows * (g.cols + 1)).fill(null);
+            g.boxes = new Array(g.rows * g.cols).fill(null);
+            g.myTurn = g.isHost;
+            g.myScore = 0;
+            g.oppScore = 0;
+        }
+    }
+
+    // For games where the host needs to push some initial state to the guest right
+    // after they accept (a starting prompt/question), rather than waiting for the
+    // guest to make the first move -- tic-tac-toe/rps/truthdare don't need this
+    // since their first move is a real player action, but wyr/trivia's first
+    // "move" is really just the host picking round 1.
+    function hostPushInitialGameData() {
+        const g = activeGame;
+        if (!g || !g.isHost) return;
+        if (g.type === 'wyr') {
+            sendGameEvent('move', { kind: 'prompt', promptIndex: g.promptIndex });
+        } else if (g.type === 'trivia') {
+            sendGameEvent('move', { kind: 'question', qIndex: g.qIndex });
         }
     }
 
@@ -12693,6 +13785,37 @@
             g.myPick = null;
             g.oppPick = null;
             g.roundResult = null;
+        } else if (g.type === 'connect4') {
+            g.board = new Array(g.rows * g.cols).fill(null);
+            g.winner = null;
+            g.winningLine = null;
+            g.myTurn = !g.myTurn;
+        } else if (g.type === 'hangman') {
+            g.isSetter = !g.isSetter;
+            g.phase = g.isSetter ? 'setting' : 'waiting';
+            g.secretWord = null;
+            g.guessedLetters = [];
+            g.wrongCount = 0;
+            g.winner = null;
+        } else if (g.type === 'twentyq') {
+            g.isThinker = !g.isThinker;
+            g.log = [];
+            g.questionCount = 0;
+            g.phase = 'playing';
+            g.winner = null;
+        } else if (g.type === 'emojicharades') {
+            g.isClueGiver = !g.isClueGiver;
+            g.phase = g.isClueGiver ? 'clueing' : 'waiting';
+            g.clue = '';
+            g.log = [];
+            g.winner = null;
+        } else if (g.type === 'dotsboxes') {
+            g.hEdges = new Array((g.rows + 1) * g.cols).fill(null);
+            g.vEdges = new Array(g.rows * (g.cols + 1)).fill(null);
+            g.boxes = new Array(g.rows * g.cols).fill(null);
+            g.myScore = 0;
+            g.oppScore = 0;
+            g.myTurn = !g.myTurn;
         }
     }
     function playAgain() {
@@ -12755,6 +13878,209 @@
         syncInlineGameCard();
     }
 
+    function connect4Click(col) {
+        const g = activeGame;
+        if (!g || g.type !== 'connect4' || g.winner || !g.myTurn) return;
+        const row = connect4LowestEmptyRow(g, col);
+        if (row === -1) return;
+        g.board[row * g.cols + col] = g.mySymbol;
+        checkConnect4Winner();
+        g.myTurn = false;
+        sendGameEvent('move', { col });
+        syncInlineGameCard();
+    }
+
+    function wordChainSubmit(rawWord) {
+        const g = activeGame;
+        if (!g || g.type !== 'wordchain' || !g.myTurn) return;
+        const word = (rawWord || '').trim().toLowerCase();
+        if (!/^[a-z]+$/.test(word)) return showToast('Letters only, please.', 'error');
+        const lastWord = g.words.length ? g.words[g.words.length - 1].word : null;
+        if (lastWord && word[0] !== lastWord[lastWord.length - 1]) {
+            return showToast(`Word must start with "${lastWord[lastWord.length - 1].toUpperCase()}".`, 'error');
+        }
+        if (g.usedWords.includes(word)) return showToast('That word was already used.', 'error');
+        g.words.push({ word, from: 'me' });
+        g.usedWords.push(word);
+        g.myTurn = false;
+        sendGameEvent('move', { word });
+        syncInlineGameCard();
+    }
+
+    function hangmanSetWord(rawWord) {
+        const g = activeGame;
+        if (!g || g.type !== 'hangman' || !g.isSetter || g.phase !== 'setting') return;
+        const word = (rawWord || '').trim().toLowerCase();
+        if (!/^[a-z]{2,20}$/.test(word)) return showToast('Use 2-20 letters only.', 'error');
+        g.secretWord = word;
+        g.phase = 'guessing';
+        sendGameEvent('move', { kind: 'setWord', word });
+        syncInlineGameCard();
+    }
+    function hangmanCheckEnd() {
+        const g = activeGame;
+        const allGuessed = g.secretWord.split('').every(ch => g.guessedLetters.includes(ch));
+        if (allGuessed) { g.phase = 'over'; g.winner = 'guesser'; }
+        else if (g.wrongCount >= g.maxWrong) { g.phase = 'over'; g.winner = 'setter'; }
+    }
+    function hangmanGuessLetter(letter) {
+        const g = activeGame;
+        if (!g || g.type !== 'hangman' || g.isSetter || g.phase !== 'guessing' || g.guessedLetters.includes(letter)) return;
+        g.guessedLetters.push(letter);
+        if (!g.secretWord.includes(letter)) g.wrongCount++;
+        hangmanCheckEnd();
+        sendGameEvent('move', { kind: 'guess', letter });
+        syncInlineGameCard();
+    }
+
+    function wyrMaybeReveal() {
+        const g = activeGame;
+        if (g.myChoice && g.oppChoice) g.revealed = true;
+    }
+    function wyrChoose(choice) {
+        const g = activeGame;
+        if (!g || g.type !== 'wyr' || g.myChoice || g.promptIndex === null) return;
+        g.myChoice = choice;
+        sendGameEvent('move', { kind: 'choice', choice });
+        wyrMaybeReveal();
+        syncInlineGameCard();
+    }
+    function wyrNext() {
+        const g = activeGame;
+        if (!g || g.type !== 'wyr' || !g.isHost || !g.revealed) return;
+        let next;
+        do { next = Math.floor(Math.random() * WYR_PROMPTS.length); } while (next === g.promptIndex && WYR_PROMPTS.length > 1);
+        g.promptIndex = next;
+        g.myChoice = null;
+        g.oppChoice = null;
+        g.revealed = false;
+        sendGameEvent('move', { kind: 'prompt', promptIndex: g.promptIndex });
+        syncInlineGameCard();
+    }
+
+    function twentyQAsk(text) {
+        const g = activeGame;
+        const q = (text || '').trim();
+        if (!g || g.type !== 'twentyq' || g.isThinker || g.phase !== 'playing' || !q) return;
+        g.log.push({ from: 'me', kind: 'question', text: q });
+        g.questionCount++;
+        sendGameEvent('move', { kind: 'question', text: q });
+        if (g.questionCount >= 20) { g.phase = 'over'; g.winner = 'thinker'; }
+        syncInlineGameCard();
+    }
+    function twentyQAnswer(answer) {
+        const g = activeGame;
+        if (!g || g.type !== 'twentyq' || !g.isThinker || g.phase !== 'playing') return;
+        g.log.push({ from: 'me', kind: 'answer', text: answer });
+        sendGameEvent('move', { kind: 'answer', text: answer });
+        syncInlineGameCard();
+    }
+    function twentyQFinalGuess(text) {
+        const g = activeGame;
+        const guess = (text || '').trim();
+        if (!g || g.type !== 'twentyq' || g.isThinker || g.phase !== 'playing' || !guess) return;
+        g.log.push({ from: 'me', kind: 'finalguess', text: guess });
+        sendGameEvent('move', { kind: 'finalguess', text: guess });
+        syncInlineGameCard();
+    }
+    function twentyQJudge(correct) {
+        const g = activeGame;
+        if (!g || g.type !== 'twentyq' || !g.isThinker || g.phase !== 'playing') return;
+        g.log.push({ from: 'me', kind: 'judge', text: correct ? 'Correct! 🎉' : 'Nope, keep guessing.' });
+        if (correct) { g.phase = 'over'; g.winner = 'guesser'; }
+        sendGameEvent('move', { kind: 'judge', correct });
+        syncInlineGameCard();
+    }
+
+    function emojiSetClue(text) {
+        const g = activeGame;
+        const clue = (text || '').trim();
+        if (!g || g.type !== 'emojicharades' || !g.isClueGiver || g.phase !== 'clueing' || !clue) return;
+        g.clue = clue;
+        g.phase = 'guessing';
+        sendGameEvent('move', { kind: 'clue', text: clue });
+        syncInlineGameCard();
+    }
+    function emojiSubmitGuess(text) {
+        const g = activeGame;
+        const guess = (text || '').trim();
+        if (!g || g.type !== 'emojicharades' || g.isClueGiver || g.phase !== 'guessing' || !guess) return;
+        g.log.push({ from: 'me', text: guess });
+        sendGameEvent('move', { kind: 'guess', text: guess });
+        syncInlineGameCard();
+    }
+    function emojiMarkCorrect() {
+        const g = activeGame;
+        if (!g || g.type !== 'emojicharades' || !g.isClueGiver || g.phase !== 'guessing') return;
+        g.phase = 'over';
+        g.winner = 'guesser';
+        sendGameEvent('move', { kind: 'correct' });
+        syncInlineGameCard();
+    }
+
+    function triviaMaybeReveal() {
+        const g = activeGame;
+        if (g.myAnswer !== null && g.oppAnswer !== null) g.revealed = true;
+    }
+    function triviaAnswer(choiceIdx) {
+        const g = activeGame;
+        if (!g || g.type !== 'trivia' || g.myAnswer !== null || g.qIndex === null) return;
+        g.myAnswer = choiceIdx;
+        if (choiceIdx === TRIVIA_QUESTIONS[g.qIndex].correctIdx) g.myScore++;
+        sendGameEvent('move', { kind: 'answer', choiceIdx });
+        triviaMaybeReveal();
+        syncInlineGameCard();
+    }
+    function triviaNext() {
+        const g = activeGame;
+        if (!g || g.type !== 'trivia' || !g.isHost || !g.revealed) return;
+        g.qIndex = (g.qIndex + 1) % TRIVIA_QUESTIONS.length;
+        g.myAnswer = null;
+        g.oppAnswer = null;
+        g.revealed = false;
+        sendGameEvent('move', { kind: 'question', qIndex: g.qIndex });
+        syncInlineGameCard();
+    }
+
+    function dotsBoxCheckBoxesForEdge(g, kind, idx, owner) {
+        let completed = 0;
+        const boxesToCheck = [];
+        if (kind === 'h') {
+            const r = Math.floor(idx / g.cols), c = idx % g.cols;
+            if (r < g.rows) boxesToCheck.push([r, c]);
+            if (r > 0) boxesToCheck.push([r - 1, c]);
+        } else {
+            const r = Math.floor(idx / (g.cols + 1)), c = idx % (g.cols + 1);
+            if (c < g.cols) boxesToCheck.push([r, c]);
+            if (c > 0) boxesToCheck.push([r, c - 1]);
+        }
+        boxesToCheck.forEach(([r, c]) => {
+            const bi = r * g.cols + c;
+            if (g.boxes[bi]) return;
+            const top = g.hEdges[r * g.cols + c];
+            const bottom = g.hEdges[(r + 1) * g.cols + c];
+            const left = g.vEdges[r * (g.cols + 1) + c];
+            const right = g.vEdges[r * (g.cols + 1) + c + 1];
+            if (top && bottom && left && right) {
+                g.boxes[bi] = owner;
+                completed++;
+            }
+        });
+        return completed;
+    }
+    function dotsBoxClickEdge(kind, idx) {
+        const g = activeGame;
+        if (!g || g.type !== 'dotsboxes' || !g.myTurn) return;
+        const arr = kind === 'h' ? g.hEdges : g.vEdges;
+        if (arr[idx]) return;
+        arr[idx] = 'me';
+        const completed = dotsBoxCheckBoxesForEdge(g, kind, idx, 'me');
+        g.myScore += completed;
+        if (completed === 0) g.myTurn = false;
+        sendGameEvent('move', { kind, idx });
+        syncInlineGameCard();
+    }
+
     function applyOpponentMove(payload) {
         const g = activeGame;
         if (g.type === 'tictactoe') {
@@ -12770,6 +14096,78 @@
                 g.awaitingResponse = true;
             } else if (payload.kind === 'response') {
                 g.log.push({ from: 'opp', mode: 'response', text: payload.text });
+            }
+        } else if (g.type === 'connect4') {
+            const row = connect4LowestEmptyRow(g, payload.col);
+            if (row !== -1) g.board[row * g.cols + payload.col] = g.oppSymbol;
+            checkConnect4Winner();
+            g.myTurn = true;
+        } else if (g.type === 'wordchain') {
+            g.words.push({ word: payload.word, from: 'opp' });
+            g.usedWords.push(payload.word);
+            g.myTurn = true;
+        } else if (g.type === 'hangman') {
+            if (payload.kind === 'setWord') {
+                g.secretWord = payload.word;
+                g.phase = 'guessing';
+            } else if (payload.kind === 'guess') {
+                if (!g.guessedLetters.includes(payload.letter)) {
+                    g.guessedLetters.push(payload.letter);
+                    if (!g.secretWord.includes(payload.letter)) g.wrongCount++;
+                    hangmanCheckEnd();
+                }
+            }
+        } else if (g.type === 'wyr') {
+            if (payload.kind === 'prompt') {
+                g.promptIndex = payload.promptIndex;
+                g.myChoice = null;
+                g.oppChoice = null;
+                g.revealed = false;
+            } else if (payload.kind === 'choice') {
+                g.oppChoice = payload.choice;
+                wyrMaybeReveal();
+            }
+        } else if (g.type === 'twentyq') {
+            if (payload.kind === 'question') {
+                g.log.push({ from: 'opp', kind: 'question', text: payload.text });
+                g.questionCount++;
+                if (g.questionCount >= 20) { g.phase = 'over'; g.winner = 'thinker'; }
+            } else if (payload.kind === 'answer') {
+                g.log.push({ from: 'opp', kind: 'answer', text: payload.text });
+            } else if (payload.kind === 'finalguess') {
+                g.log.push({ from: 'opp', kind: 'finalguess', text: payload.text });
+            } else if (payload.kind === 'judge') {
+                g.log.push({ from: 'opp', kind: 'judge', text: payload.correct ? 'Correct! 🎉' : 'Nope, keep guessing.' });
+                if (payload.correct) { g.phase = 'over'; g.winner = 'guesser'; }
+            }
+        } else if (g.type === 'emojicharades') {
+            if (payload.kind === 'clue') {
+                g.clue = payload.text;
+                g.phase = 'guessing';
+            } else if (payload.kind === 'guess') {
+                g.log.push({ from: 'opp', text: payload.text });
+            } else if (payload.kind === 'correct') {
+                g.phase = 'over';
+                g.winner = 'guesser';
+            }
+        } else if (g.type === 'trivia') {
+            if (payload.kind === 'question') {
+                g.qIndex = payload.qIndex;
+                g.myAnswer = null;
+                g.oppAnswer = null;
+                g.revealed = false;
+            } else if (payload.kind === 'answer') {
+                g.oppAnswer = payload.choiceIdx;
+                if (payload.choiceIdx === TRIVIA_QUESTIONS[g.qIndex].correctIdx) g.oppScore++;
+                triviaMaybeReveal();
+            }
+        } else if (g.type === 'dotsboxes') {
+            const arr = payload.kind === 'h' ? g.hEdges : g.vEdges;
+            if (!arr[payload.idx]) {
+                arr[payload.idx] = 'opp';
+                const completed = dotsBoxCheckBoxesForEdge(g, payload.kind, payload.idx, 'opp');
+                g.oppScore += completed;
+                if (completed === 0) g.myTurn = true;
             }
         }
     }
@@ -12798,6 +14196,22 @@
             html += renderRpsBoard(g);
         } else if (g.type === 'truthdare') {
             html += renderTruthDareBoard(g);
+        } else if (g.type === 'connect4') {
+            html += renderConnect4Board(g);
+        } else if (g.type === 'wordchain') {
+            html += renderWordChainBoard(g);
+        } else if (g.type === 'hangman') {
+            html += renderHangmanBoard(g);
+        } else if (g.type === 'wyr') {
+            html += renderWyrBoard(g);
+        } else if (g.type === 'twentyq') {
+            html += renderTwentyQBoard(g);
+        } else if (g.type === 'emojicharades') {
+            html += renderEmojiCharadesBoard(g);
+        } else if (g.type === 'trivia') {
+            html += renderTriviaBoard(g);
+        } else if (g.type === 'dotsboxes') {
+            html += renderDotsBoxesBoard(g);
         }
         return html;
     }
@@ -12889,6 +14303,236 @@
             inner += `<p class="game-status-text">Waiting for ${g.peer}...</p>`;
         }
         return inner;
+    }
+
+    function renderConnect4Board(g) {
+        let statusText;
+        if (g.winner === 'draw') statusText = "It's a draw!";
+        else if (g.winner) statusText = (g.winner === g.mySymbol) ? 'You won! 🎉' : `${g.peer} won.`;
+        else statusText = g.myTurn ? 'Your turn — tap a column' : `Waiting for ${g.peer}...`;
+
+        let grid = `<div class="c4-grid" style="grid-template-columns: repeat(${g.cols}, 1fr);">`;
+        g.board.forEach((cell, idx) => {
+            const col = idx % g.cols;
+            const isWinCell = g.winningLine && g.winningLine.includes(idx);
+            const colFull = connect4LowestEmptyRow(g, col) === -1;
+            const disabled = !!g.winner || !g.myTurn || colFull;
+            const cls = cell === 'r' ? 'c4-red' : cell === 'y' ? 'c4-yellow' : '';
+            grid += `<button type="button" class="c4-cell ${cls} ${isWinCell ? 'win' : ''}" ${disabled ? 'disabled' : ''} onclick="connect4Click(${col})"></button>`;
+        });
+        grid += `</div>`;
+
+        let footer = `<p class="game-status-text">${statusText}</p>`;
+        if (g.winner) footer += `<button type="button" class="game-primary-btn" onclick="playAgain()">Play Again</button>`;
+        return grid + footer;
+    }
+
+    function renderWordChainBoard(g) {
+        const lastWord = g.words.length ? g.words[g.words.length - 1].word : null;
+        let inner = `<div class="wc-log">${g.words.length ? g.words.slice(-10).map(w => {
+            const who = w.from === 'me' ? 'You' : g.peer;
+            return `<span class="wc-word-chip">${w.word}<small>${who}</small></span>`;
+        }).join('') : '<p class="game-status-text">No words yet — start the chain!</p>'}</div>`;
+
+        if (g.myTurn) {
+            const hint = lastWord ? `Start with "${lastWord[lastWord.length - 1].toUpperCase()}"` : 'Type any word to start';
+            inner += `<p class="game-status-text">${hint}</p>
+                <div class="wc-input-row">
+                    <input type="text" id="wordChainInput" class="game-text-input" placeholder="Type a word..." autocomplete="off" onkeydown="if(event.key==='Enter'){wordChainSubmit(this.value);this.value='';}">
+                    <button type="button" class="game-primary-btn" onclick="wordChainSubmit(document.getElementById('wordChainInput').value); document.getElementById('wordChainInput').value='';">Send</button>
+                </div>`;
+        } else {
+            inner += `<p class="game-status-text">Waiting for ${g.peer}...</p>`;
+        }
+        return inner;
+    }
+
+    function renderHangmanBoard(g) {
+        if (g.phase === 'setting') {
+            return `<p class="game-status-text">Pick a secret word for ${g.peer} to guess.</p>
+                <div class="wc-input-row">
+                    <input type="text" id="hangmanWordInput" class="game-text-input" placeholder="Secret word..." autocomplete="off" onkeydown="if(event.key==='Enter'){hangmanSetWord(this.value);}">
+                    <button type="button" class="game-primary-btn" onclick="hangmanSetWord(document.getElementById('hangmanWordInput').value);">Set Word</button>
+                </div>`;
+        }
+        if (g.phase === 'waiting') {
+            return `<p class="game-status-text">Waiting for ${g.peer} to choose a word...</p>`;
+        }
+
+        const masked = g.secretWord.split('').map(ch => g.guessedLetters.includes(ch) ? ch.toUpperCase() : '_').join(' ');
+        let inner = `<p class="hangman-word">${masked}</p>
+            <p class="game-status-text">Wrong guesses: ${g.wrongCount} / ${g.maxWrong}</p>`;
+
+        if (g.phase === 'over') {
+            const wonText = g.winner === 'guesser'
+                ? (g.isSetter ? `${g.peer} guessed it! It was "${g.secretWord}".` : `You guessed it! 🎉`)
+                : (g.isSetter ? `You stumped ${g.peer}! The word was "${g.secretWord}".` : `Out of guesses. The word was "${g.secretWord}".`);
+            inner += `<p class="game-status-text">${wonText}</p>
+                <button type="button" class="game-primary-btn" onclick="playAgain()">Play Again</button>`;
+        } else if (g.isSetter) {
+            inner += `<p class="game-status-text">Waiting for ${g.peer} to guess...</p>`;
+        } else {
+            const letters = 'abcdefghijklmnopqrstuvwxyz'.split('');
+            inner += `<div class="hangman-keyboard">${letters.map(l => {
+                const used = g.guessedLetters.includes(l);
+                return `<button type="button" class="hangman-key ${used ? 'used' : ''}" ${used ? 'disabled' : ''} onclick="hangmanGuessLetter('${l}')">${l.toUpperCase()}</button>`;
+            }).join('')}</div>`;
+        }
+        return inner;
+    }
+
+    function renderWyrBoard(g) {
+        if (g.promptIndex === null) return `<p class="game-status-text">Waiting for ${g.peer} to start the round...</p>`;
+        const prompt = WYR_PROMPTS[g.promptIndex];
+        let inner = '';
+        if (g.revealed) {
+            inner += `<div class="wyr-options">
+                <div class="wyr-option-card ${g.myChoice === 'a' ? 'mine' : ''} ${g.oppChoice === 'a' ? 'theirs' : ''}"><p>${prompt.a}</p></div>
+                <div class="wyr-option-card ${g.myChoice === 'b' ? 'mine' : ''} ${g.oppChoice === 'b' ? 'theirs' : ''}"><p>${prompt.b}</p></div>
+            </div>
+            <p class="game-status-text">You picked ${g.myChoice === 'a' ? 'A' : 'B'} · ${g.peer} picked ${g.oppChoice === 'a' ? 'A' : 'B'}</p>`;
+            if (g.isHost) inner += `<button type="button" class="game-primary-btn" onclick="wyrNext()">Next Round</button>`;
+            else inner += `<p class="game-status-text">Waiting for ${g.peer} to continue...</p>`;
+        } else if (g.myChoice) {
+            inner += `<p class="game-status-text">Waiting for ${g.peer} to choose...</p>`;
+        } else {
+            inner += `<div class="wyr-options">
+                <button type="button" class="wyr-option-btn" onclick="wyrChoose('a')">${prompt.a}</button>
+                <button type="button" class="wyr-option-btn" onclick="wyrChoose('b')">${prompt.b}</button>
+            </div>`;
+        }
+        return inner;
+    }
+
+    function renderTwentyQBoard(g) {
+        let inner = `<p class="game-status-text">${g.isThinker ? "Think of something — answer yes/no questions." : `Ask yes/no questions (${g.questionCount}/20)`}</p>`;
+        inner += `<div class="td-log">${g.log.slice(-8).map(entry => {
+            const who = entry.from === 'me' ? 'You' : g.peer;
+            const prefix = entry.kind === 'question' ? '❓ ' : entry.kind === 'finalguess' ? '🤔 Guess: ' : '';
+            return `<div class="td-log-entry"><strong>${who}:</strong> ${prefix}${entry.text}</div>`;
+        }).join('')}</div>`;
+
+        if (g.phase === 'over') {
+            const wonText = g.winner === 'guesser' ? (g.isThinker ? `${g.peer} figured it out!` : 'You got it! 🎉') : (g.isThinker ? 'You stumped them!' : `Out of questions — ${g.peer} wins.`);
+            inner += `<p class="game-status-text">${wonText}</p><button type="button" class="game-primary-btn" onclick="playAgain()">Play Again</button>`;
+        } else if (g.isThinker) {
+            inner += `<div class="td-choice-row">
+                <button type="button" class="game-primary-btn secondary" onclick="twentyQAnswer('Yes')">Yes</button>
+                <button type="button" class="game-primary-btn secondary" onclick="twentyQAnswer('No')">No</button>
+                <button type="button" class="game-primary-btn secondary" onclick="twentyQAnswer('Maybe')">Maybe</button>
+            </div>
+            <button type="button" class="game-primary-btn" onclick="twentyQJudge(true)">They Guessed It!</button>`;
+        } else {
+            inner += `<div class="wc-input-row">
+                <input type="text" id="twentyQInput" class="game-text-input" placeholder="Ask a yes/no question..." autocomplete="off" onkeydown="if(event.key==='Enter'){twentyQAsk(this.value);this.value='';}">
+                <button type="button" class="game-primary-btn" onclick="twentyQAsk(document.getElementById('twentyQInput').value); document.getElementById('twentyQInput').value='';">Ask</button>
+            </div>
+            <button type="button" class="game-primary-btn secondary" onclick="const guess=prompt('Your final guess:'); if(guess) twentyQFinalGuess(guess);">I Know It!</button>`;
+        }
+        return inner;
+    }
+
+    function renderEmojiCharadesBoard(g) {
+        if (g.phase === 'clueing') {
+            return `<p class="game-status-text">Describe something using only emoji!</p>
+                <div class="wc-input-row">
+                    <input type="text" id="emojiClueInput" class="game-text-input" placeholder="🎬🍿😱" autocomplete="off" onkeydown="if(event.key==='Enter'){emojiSetClue(this.value);}">
+                    <button type="button" class="game-primary-btn" onclick="emojiSetClue(document.getElementById('emojiClueInput').value);">Send Clue</button>
+                </div>`;
+        }
+        if (g.phase === 'waiting') {
+            return `<p class="game-status-text">Waiting for ${g.peer} to send a clue...</p>`;
+        }
+
+        let inner = `<p class="emoji-clue-display">${g.clue}</p>`;
+        inner += `<div class="td-log">${g.log.slice(-8).map(entry => {
+            const who = entry.from === 'me' ? 'You' : g.peer;
+            return `<div class="td-log-entry"><strong>${who}:</strong> ${entry.text}</div>`;
+        }).join('')}</div>`;
+
+        if (g.phase === 'over') {
+            inner += `<p class="game-status-text">${g.isClueGiver ? `${g.peer} guessed it! 🎉` : 'You guessed it! 🎉'}</p>
+                <button type="button" class="game-primary-btn" onclick="playAgain()">Play Again</button>`;
+        } else if (g.isClueGiver) {
+            inner += `<p class="game-status-text">Mark a guess correct once they get it.</p>
+                <button type="button" class="game-primary-btn" onclick="emojiMarkCorrect()">Mark Correct</button>`;
+        } else {
+            inner += `<div class="wc-input-row">
+                <input type="text" id="emojiGuessInput" class="game-text-input" placeholder="Your guess..." autocomplete="off" onkeydown="if(event.key==='Enter'){emojiSubmitGuess(this.value);this.value='';}">
+                <button type="button" class="game-primary-btn" onclick="emojiSubmitGuess(document.getElementById('emojiGuessInput').value); document.getElementById('emojiGuessInput').value='';">Guess</button>
+            </div>`;
+        }
+        return inner;
+    }
+
+    function renderTriviaBoard(g) {
+        if (g.qIndex === null) return `<p class="game-status-text">Waiting for ${g.peer} to start...</p>`;
+        const q = TRIVIA_QUESTIONS[g.qIndex];
+        let inner = `<p class="game-status-text">Score — You: ${g.myScore} · ${g.peer}: ${g.oppScore}</p>
+            <p class="trivia-question">${q.q}</p>`;
+
+        if (g.revealed) {
+            inner += `<div class="trivia-choices">${q.choices.map((c, i) => {
+                let cls = '';
+                if (i === q.correctIdx) cls = 'correct';
+                else if (i === g.myAnswer) cls = 'wrong';
+                return `<div class="trivia-choice ${cls}">${c}${i === g.myAnswer ? ' (you)' : ''}${i === g.oppAnswer ? ` (${g.peer})` : ''}</div>`;
+            }).join('')}</div>`;
+            if (g.isHost) inner += `<button type="button" class="game-primary-btn" onclick="triviaNext()">Next Question</button>`;
+            else inner += `<p class="game-status-text">Waiting for ${g.peer} to continue...</p>`;
+        } else if (g.myAnswer !== null) {
+            inner += `<p class="game-status-text">Waiting for ${g.peer} to answer...</p>`;
+        } else {
+            inner += `<div class="trivia-choices">${q.choices.map((c, i) => `<button type="button" class="trivia-choice-btn" onclick="triviaAnswer(${i})">${c}</button>`).join('')}</div>`;
+        }
+        return inner;
+    }
+
+    function renderDotsBoxesBoard(g) {
+        const gridRows = g.rows * 2 + 1;
+        const gridCols = g.cols * 2 + 1;
+        let cellsHtml = '';
+        for (let gr = 0; gr < gridRows; gr++) {
+            for (let gc = 0; gc < gridCols; gc++) {
+                if (gr % 2 === 0 && gc % 2 === 0) {
+                    cellsHtml += `<div class="db-dot"></div>`;
+                } else if (gr % 2 === 0 && gc % 2 === 1) {
+                    const r = gr / 2, c = (gc - 1) / 2;
+                    const idx = r * g.cols + c;
+                    const owner = g.hEdges[idx];
+                    const disabled = !!owner || !g.myTurn;
+                    cellsHtml += `<button type="button" class="db-edge db-edge-h ${owner ? 'drawn-' + owner : ''}" ${disabled ? 'disabled' : ''} onclick="dotsBoxClickEdge('h', ${idx})"></button>`;
+                } else if (gr % 2 === 1 && gc % 2 === 0) {
+                    const r = (gr - 1) / 2, c = gc / 2;
+                    const idx = r * (g.cols + 1) + c;
+                    const owner = g.vEdges[idx];
+                    const disabled = !!owner || !g.myTurn;
+                    cellsHtml += `<button type="button" class="db-edge db-edge-v ${owner ? 'drawn-' + owner : ''}" ${disabled ? 'disabled' : ''} onclick="dotsBoxClickEdge('v', ${idx})"></button>`;
+                } else {
+                    const r = (gr - 1) / 2, c = (gc - 1) / 2;
+                    const idx = r * g.cols + c;
+                    const owner = g.boxes[idx];
+                    cellsHtml += `<div class="db-box ${owner ? 'owned-' + owner : ''}"></div>`;
+                }
+            }
+        }
+
+        const totalBoxes = g.rows * g.cols;
+        const boxesFilled = g.boxes.filter(b => b).length;
+        const gameOver = boxesFilled === totalBoxes;
+
+        let statusText;
+        if (gameOver) {
+            statusText = g.myScore > g.oppScore ? 'You won! 🎉' : (g.myScore < g.oppScore ? `${g.peer} won.` : "It's a draw!");
+        } else {
+            statusText = g.myTurn ? 'Your turn — draw a line' : `Waiting for ${g.peer}...`;
+        }
+
+        let html = `<p class="game-status-text">Score — You: ${g.myScore} · ${g.peer}: ${g.oppScore}</p>
+            <div class="db-grid" style="grid-template-columns: repeat(${gridCols}, auto);">${cellsHtml}</div>
+            <p class="game-status-text">${statusText}</p>`;
+        if (gameOver) html += `<button type="button" class="game-primary-btn" onclick="playAgain()">Play Again</button>`;
+        return html;
     }
 
     /* NEARBY — anonymous, 24h-expiring chats with whoever else is online right now.
@@ -13114,6 +14758,7 @@
         if (match.expiresAt <= Date.now()) { handleNearbyMatchExpired(matchId); return; }
 
         exitAuxPanelSilently();
+        if (aiVoiceFlow) cancelAiVoiceFlow();
         currentActiveUser = "";
         currentNearbyMatchId = matchId;
         match.unread = false;
@@ -13451,12 +15096,14 @@
         }
         stopOutgoingTyping();
         exitAuxPanelSilently();
+        if (aiVoiceFlow) cancelAiVoiceFlow();
         // Captured before currentActiveUser changes/the list rebuilds, so the morph
         // animation opens from exactly where the tapped row was on screen.
         const originRect = triggerRowEl ? triggerRowEl.getBoundingClientRect() : null;
         currentActiveUser = username;
         stopNearbyCountdownInterval();
         currentNearbyMatchId = null; // mutually exclusive with a regular chat
+        syncAiVoiceToggleBtn(username);
 
         const panel = document.getElementById('chatPanel');
         panel.classList.remove('no-active-chat');
@@ -14229,6 +15876,7 @@
     }
 
     async function sendPrivateMessage() {
+        if (aiVoiceFlow) cancelAiVoiceFlow();
         if (currentNearbyMatchId) return sendNearbyMessage();
         if (isGroupChatKey(currentActiveUser)) return sendGroupTextMessage();
         if (!currentActiveUser) return showToast("Select a conversation path thread first.", 'info');
@@ -14350,6 +15998,7 @@
         if (isSameConversation) {
             appendLiveMessageNode(newMsg);
             if (newMsg.id && isReadReceiptsEnabled()) socket.emit('mark_message_read', { peer: sender, messageIds: [newMsg.id] });
+            if (isAiVoiceModeEnabled(sender) && !(globalVoiceControl && globalVoiceControl.shouldRestart)) startAiVoiceFlow(sender, newMsg);
         }
     }
 
@@ -14380,78 +16029,11 @@
     // background. Positions are computed in pixels against the container's current
     // size, so it needs regenerating whenever that size is first known or changes
     // (see the resize listener and the chatPanel display flip in startChatSession).
-    function generateLogoWatermark(containerId) {
-        const container = document.getElementById(containerId);
-        if (!container) return;
-        const width = container.clientWidth;
-        const height = container.clientHeight;
-        if (width < 10 || height < 10) return; // not laid out/visible yet -- nothing to place against
-
-        const count = Math.max(10, Math.min(42, Math.round((width * height) / 13000)));
-        const placed = [];
-        const frag = document.createDocumentFragment();
-        const timingFns = ['ease-in-out', 'ease-in', 'ease-out', 'linear'];
-
-        for (let i = 0; i < count; i++) {
-            // Mostly small-to-medium birds, with roughly 1 in 6 noticeably bigger --
-            // a size mix instead of one flat range.
-            const isBig = Math.random() < 0.16;
-            const size = isBig ? (86 + Math.random() * 54) : (24 + Math.random() * 40);
-            let x, y, fits = false;
-            for (let attempt = 0; attempt < 60; attempt++) {
-                x = Math.random() * Math.max(1, width - size);
-                y = Math.random() * Math.max(1, height - size);
-                const cx = x + size / 2, cy = y + size / 2;
-                fits = placed.every(p => {
-                    const dx = cx - p.cx, dy = cy - p.cy;
-                    return Math.sqrt(dx * dx + dy * dy) > (size + p.size) / 2 + 10; // gap so they never touch, let alone overlap
-                });
-                if (fits) break;
-            }
-            if (!fits) continue; // couldn't find a clear spot after 60 tries -- skip rather than force an overlap
-            placed.push({ cx: x + size / 2, cy: y + size / 2, size });
-
-            const el = document.createElement('div');
-            el.className = 'logo-watermark-item';
-            el.style.left = x + 'px';
-            el.style.top = y + 'px';
-            el.style.width = size + 'px';
-            el.style.height = size + 'px';
-
-            // Horizontal-only flip -- mirrors which way the bird "faces" without ever
-            // turning it upside-down (no vertical flip -- see the keyframe note above).
-            el.style.setProperty('--wm-flip-x', Math.random() < 0.5 ? -1 : 1);
-
-            // A bent 2-segment path (a random midpoint that ISN'T on the straight
-            // line between start and end) rather than back-and-forth along one
-            // straight vector, plus a per-instance timing function and a small
-            // rotation wobble -- this is what keeps the flight path itself looking
-            // random rather than every bird tracing the same kind of line.
-            const dx = Math.random() * 70 - 35, dy = Math.random() * 70 - 35;
-            el.style.setProperty('--wm-dx', dx.toFixed(0) + 'px');
-            el.style.setProperty('--wm-dy', dy.toFixed(0) + 'px');
-            el.style.setProperty('--wm-mid-dx', (dx / 2 + (Math.random() * 40 - 20)).toFixed(0) + 'px');
-            el.style.setProperty('--wm-mid-dy', (dy / 2 + (Math.random() * 40 - 20)).toFixed(0) + 'px');
-            el.style.setProperty('--wm-rot', (Math.random() * 14 - 7).toFixed(1) + 'deg');
-            el.style.animationTimingFunction = timingFns[Math.floor(Math.random() * timingFns.length)];
-            el.style.animationDuration = (8 + Math.random() * 9).toFixed(1) + 's';
-            el.style.animationDelay = (-Math.random() * 12).toFixed(1) + 's';
-            frag.appendChild(el);
-        }
-
-        container.innerHTML = '';
-        container.appendChild(frag);
-    }
-    function refreshLogoWatermarks() {
-        generateLogoWatermark('setupLogoWatermarkLayer');
-        generateLogoWatermark('chatLogoWatermarkLayer');
-        generateLogoWatermark('sidebarLogoWatermarkLayer');
-    }
-    let logoWatermarkResizeTimer = null;
-    window.addEventListener('resize', () => {
-        clearTimeout(logoWatermarkResizeTimer);
-        logoWatermarkResizeTimer = setTimeout(refreshLogoWatermarks, 400);
-    });
+    // Scattered bird-logo watermarks removed from the background site-wide;
+    // call sites left in place (setup/chat/sidebar layers, resize refresh) but
+    // this is now a no-op so nothing renders into them.
+    function generateLogoWatermark(containerId) {}
+    function refreshLogoWatermarks() {}
 
     hydrateStaticIcons();
     applyStoredTheme();

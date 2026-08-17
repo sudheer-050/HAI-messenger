@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Privacy Policy — HAI Messenger</title>
+    <meta name="description" content="How HAI Messenger and H AI handle your data.">
+    <link rel="icon" href="/icons/favicon-32.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #09090b;
+            --text-normal: #fafafa;
+            --text-muted: #a1a1aa;
+            --accent-brand: #9B8AFB;
+            --border-color: #27272a;
+            --font-stack: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        body { font-family: var(--font-stack); background: var(--bg-main); color: var(--text-normal); }
+        header { max-width: 760px; margin: 0 auto; padding: 24px 24px 0; }
+        .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; font-size: 13.5px; font-weight: 500; }
+        .back-link:hover { color: var(--text-normal); }
+        .back-link svg { width: 15px; height: 15px; }
+        main { max-width: 760px; margin: 0 auto; padding: 24px 24px 96px; }
+        h1 { font-size: clamp(28px, 5vw, 38px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 6px; }
+        .updated { font-size: 13px; color: var(--text-muted); margin: 0 0 40px; }
+        h2 { font-size: 19px; font-weight: 700; margin: 40px 0 12px; }
+        p, li { font-size: 14.5px; line-height: 1.7; color: #d4d4d8; }
+        p { margin: 0 0 14px; }
+        ul { margin: 0 0 14px; padding-left: 20px; }
+        li { margin-bottom: 6px; }
+        strong { color: var(--text-normal); }
+        a { color: var(--accent-brand); }
+        .note {
+            background: rgba(155, 138, 251, 0.08); border: 1px solid rgba(155, 138, 251, 0.25);
+            border-radius: 12px; padding: 14px 16px; font-size: 13.5px; color: #d4d4d8; margin: 0 0 32px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <a class="back-link" href="/">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            HAI
+        </a>
+    </header>
+    <main>
+        <h1>Privacy Policy</h1>
+        <p class="updated">Last updated: August 2026</p>
+
+        <div class="note">
+            This policy covers HAI Messenger and H AI. It's written to describe exactly what this
+            software actually does with your data — most of it, by design, is very little.
+        </div>
+
+        <h2>The short version</h2>
+        <p>
+            HAI Messenger is end-to-end encrypted: messages, photos, documents, and voice notes are
+            encrypted on your device before they're sent, and the server only ever stores and relays
+            ciphertext it cannot read. H AI runs on a language model hosted on this same server —
+            nothing you say to H is sent to an outside AI company.
+        </p>
+
+        <h2>Account information</h2>
+        <p>When you create an account, we store:</p>
+        <ul>
+            <li>Your first name, last name, username, and email address.</li>
+            <li>Your password, as a one-way bcrypt hash — never in plain text, and never recoverable by us.</li>
+            <li>An avatar image, if you choose to set one.</li>
+        </ul>
+        <p>Your encryption keypair is generated in your browser at signup. The private key is never sent to the server.</p>
+
+        <h2>Messages and media</h2>
+        <p>
+            Every message, photo, voice note, and document is encrypted on your device with a hybrid
+            RSA-OAEP-2048 + AES-256-GCM scheme before it ever leaves your device. The server stores and
+            forwards this ciphertext along with routing metadata it needs to deliver it — who it's for
+            and when it arrived — but it does not hold the keys required to decrypt the content itself.
+        </p>
+
+        <h2>Nearby chat</h2>
+        <p>
+            Nearby is anonymous by design: no account identity is attached to a Nearby conversation, and
+            the entire thread self-destructs and is deleted after 24 hours. Because it's anonymous, we
+            have no way to verify who you're actually talking to — use it at your own discretion.
+        </p>
+
+        <h2>H AI</h2>
+        <p>
+            H runs on a locally-hosted language model (via Ollama), served from this same infrastructure —
+            not a third-party AI API. Conversations with H are not stored server-side beyond the current
+            session needed to hold a conversation. If you teach H a word or phrase it doesn't recognize,
+            that's saved only in your own browser's local storage — never synced to a server or shared
+            with other visitors.
+        </p>
+
+        <h2>Other data we process</h2>
+        <ul>
+            <li><strong>IP address</strong> — used transiently for rate-limiting login, signup, and password-reset attempts to prevent abuse. Not sold, not used for tracking or advertising.</li>
+            <li><strong>Verification emails</strong> — sign-up and password-reset codes are sent via Resend, a transactional email provider. Only the code and your email address pass through them, subject to their own privacy practices.</li>
+            <li><strong>Translation</strong> — if you use in-app message translation, the text you choose to translate is sent to a translation engine to be processed. Text you don't translate is never sent there.</li>
+            <li><strong>Usage analytics (admin-facing only)</strong> — the site operator can see aggregate, metadata-only statistics (like daily active users, feature usage counts, and retention) to run the service. This is computed from event counts, never from message content, and isn't shared outside the operator's own admin dashboard.</li>
+        </ul>
+
+        <h2>Cookies</h2>
+        <p>
+            HAI Messenger uses a single essential session cookie to keep you signed in. It's httpOnly
+            (not readable by page scripts) and contains no tracking identifiers. There are no third-party
+            advertising or analytics cookies.
+        </p>
+
+        <h2>Your rights</h2>
+        <p>
+            You can delete your account at any time from Settings. This removes your account record and
+            associated data from the server. Because messages are end-to-end encrypted, you're also the
+            only one who can decrypt your own message history in the first place — deleting your account
+            or clearing your browser's local storage removes your local copy.
+        </p>
+
+        <h2>Children's privacy</h2>
+        <p>
+            This service isn't directed at children, and we don't knowingly collect information from
+            anyone under the age required by local law to consent to data processing (13 in most
+            jurisdictions, higher in some). If you believe a child has created an account, contact the
+            operator so it can be removed.
+        </p>
+
+        <h2>Changes to this policy</h2>
+        <p>
+            If this policy changes in a meaningful way, the "last updated" date above will change along
+            with it. Continued use of the service after an update means you accept the revised policy.
+        </p>
+
+        <h2>Contact</h2>
+        <p>
+            Questions about this policy or your data can be sent to the address listed on the site
+            operator's contact page, or via the account settings screen.
+        </p>
+    </main>
+</body>
+</html>

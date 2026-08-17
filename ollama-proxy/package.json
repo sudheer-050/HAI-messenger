@@ -1,0 +1,9 @@
+{
+  "name": "ollama-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny authenticated forwarder in front of local Ollama, so it's safe to expose through the Cloudflare Tunnel to the Render-hosted backend.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.19.2" }
+}

@@ -1,0 +1,60 @@
+# Render Blueprint -- deploys HAI Messenger's backend + a free Postgres + free
+# Redis (Key Value) as one stack. Import this at https://dashboard.render.com/blueprints
+# (New > Blueprint, point it at this repo). LibreTranslate is intentionally not
+# included here -- it runs in the local docker-compose stack but nothing in the
+# app actually calls it, so it isn't worth the extra free-tier service slot.
+#
+# Ollama/H AI is NOT deployed as a Render service (no free-tier plan has enough
+# RAM to run even a small model). Instead the backend tries your own PC's Ollama
+# first, reached through a small authenticated proxy over your existing Cloudflare
+# Tunnel (see ollama-proxy/), and falls back to Groq's hosted API if your PC is
+# offline -- see OLLAMA_LOCAL_URL/OLLAMA_LOCAL_SECRET/GROQ_API_KEY below.
+#
+# Env vars marked `sync: false` have no value here on purpose -- Render will
+# prompt for them once in the dashboard during the first deploy, so secrets never
+# have to live in this file (or in git).
+
+services:
+  - name: hai-messenger-backend
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hai-messenger-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: hai-messenger-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ADMIN_USERNAMES
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_CHAT_MODEL
+        value: llama-3.1-8b-instant
+      - key: OLLAMA_LOCAL_URL
+        sync: false
+      - key: OLLAMA_LOCAL_SECRET
+        sync: false
+
+  - name: hai-messenger-redis
+    type: keyvalue
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: internal access from the backend service
+
+databases:
+  - name: hai-messenger-db
+    plan: free

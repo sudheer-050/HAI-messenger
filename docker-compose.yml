@@ -45,9 +45,29 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+      # Ollama runs on the host (not in a container) -- host.docker.internal is
+      # Docker Desktop's built-in route to it. extra_hosts below makes the same
+      # hostname resolve on Linux Docker hosts too.
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_CHAT_MODEL=llama3.2
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
       - redis
+
+  # Sits between the Cloudflare Tunnel and local Ollama so the Render-hosted
+  # backend can reach this PC's Ollama (private, free) as H's primary source,
+  # falling back to Groq only when this machine/tunnel is unreachable. Ollama
+  # itself has no auth, hence the proxy instead of exposing it directly.
+  ollama-proxy:
+    build: ./ollama-proxy
+    restart: unless-stopped
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - PROXY_SECRET=${OLLAMA_LOCAL_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -57,6 +77,7 @@ services:
       - ./cloudflared:/home/nonroot/.cloudflared
     depends_on:
       - backend
+      - ollama-proxy
 
 volumes:
   pgdata:
