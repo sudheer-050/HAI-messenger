@@ -202,7 +202,7 @@
 <body>
     <header>
         <div class="header-left">
-            <a href="/" class="back-link" aria-label="Back to homepage" title="Back to homepage">
+            <a href="/" class="back-link" id="hBackLink" aria-label="Back to homepage" title="Back to homepage">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </a>
             <div class="header-avatar">H</div>
@@ -264,6 +264,13 @@
     </main>
 
     <script>
+        /* Opened from inside the chat app (index.html links here with ?from=app) --
+           send the back arrow to the chat list instead of the public landing page,
+           since that's where this visitor actually came from. */
+        if (new URLSearchParams(location.search).get('from') === 'app') {
+            document.getElementById('hBackLink').href = '/index.html';
+        }
+
         /* ============ LEARNING / GLOSSARY (private per-browser, localStorage) ============
            When H flags a term she doesn't understand, the visitor can teach her its
            meaning; it's remembered only in this browser and sent along as extra context
