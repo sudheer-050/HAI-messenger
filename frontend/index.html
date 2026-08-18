@@ -2403,6 +2403,31 @@
             flex-direction: column;
             gap: 12px;
         }
+        /* On desktop/laptop-sized viewports, games float as a centered overlay
+           over the chat instead of sitting inline in the message scroll -- with
+           a full sidebar and wide chat pane, an inline card could land far below
+           the fold and go unnoticed. #messages has no transform, so `fixed` here
+           stays anchored to the viewport rather than that ancestor. */
+        @media (min-width: 769px) {
+            .inline-game-card {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                margin: 0;
+                z-index: 500;
+                max-height: 85vh;
+                overflow-y: auto;
+            }
+            .inline-game-card::before {
+                content: '';
+                position: fixed;
+                inset: 0;
+                left: 0;
+                background: rgba(0,0,0,0.35);
+                z-index: -1;
+            }
+        }
         .game-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .game-header h3 { margin: 0; font-size: 15px; color: var(--text-normal); }
         .game-stop-btn {

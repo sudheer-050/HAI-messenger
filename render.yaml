@@ -7,8 +7,8 @@
 # Ollama/H AI is NOT deployed as a Render service (no free-tier plan has enough
 # RAM to run even a small model). Instead the backend tries your own PC's Ollama
 # first, reached through a small authenticated proxy over your existing Cloudflare
-# Tunnel (see ollama-proxy/), and falls back to Groq's hosted API if your PC is
-# offline -- see OLLAMA_LOCAL_URL/OLLAMA_LOCAL_SECRET/GROQ_API_KEY below.
+# Tunnel (see ollama-proxy/), and falls back to Google's Gemini API if your PC is
+# offline -- see OLLAMA_LOCAL_URL/OLLAMA_LOCAL_SECRET/GEMINI_API_KEY below.
 #
 # Env vars marked `sync: false` have no value here on purpose -- Render will
 # prompt for them once in the dashboard during the first deploy, so secrets never
@@ -38,10 +38,10 @@ services:
         sync: false
       - key: ADMIN_USERNAMES
         sync: false
-      - key: GROQ_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
-      - key: GROQ_CHAT_MODEL
-        value: llama-3.1-8b-instant
+      - key: GEMINI_CHAT_MODEL
+        value: gemini-3.6-flash
       - key: OLLAMA_LOCAL_URL
         sync: false
       - key: OLLAMA_LOCAL_SECRET
