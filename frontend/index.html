@@ -964,7 +964,6 @@
         .chat-header-menu-btn:hover { background: rgba(0, 0, 0, 0.08); color: var(--text-normal); }
         .chat-header-menu-btn .icon { width: 18px; height: 18px; }
 
-        .ai-voice-toggle-btn.active { color: var(--accent-gold); }
 
         .global-voice-btn {
             position: fixed;
@@ -3866,7 +3865,6 @@
                 <h2 style="margin: 0;">Select a conversation to start chatting</h2>
             </div>
             <div class="chat-header-actions">
-                <button type="button" id="aiVoiceToggleBtn" class="chat-header-menu-btn ai-voice-toggle-btn" data-icon="volume" title="AI Voice Mode" onclick="toggleAiVoiceMode(currentActiveUser, !isAiVoiceModeEnabled(currentActiveUser))" style="display:none;"></button>
                 <button type="button" id="chatMoreMenuBtn" class="chat-header-menu-btn" data-icon="more" onclick="toggleHeaderMenu(event)"></button>
                 <div class="header-menu-dropdown" id="headerMenuDropdown">
                     <button type="button" onclick="headerMenuViewProfile()" id="headerMenuViewProfileBtn">View Profile</button>
@@ -8190,14 +8188,6 @@
         conversationHistory[username]._aiVoiceMode = checked;
         persistConversations();
         if (!checked && aiVoiceFlow && aiVoiceFlow.peer === username) cancelAiVoiceFlow();
-        if (username === currentActiveUser) syncAiVoiceToggleBtn(username);
-    }
-    function syncAiVoiceToggleBtn(username) {
-        const btn = document.getElementById('aiVoiceToggleBtn');
-        if (!btn) return;
-        const show = isAiVoiceModeSupported() && !!username && !isGroupChatKey(username);
-        btn.style.display = show ? 'flex' : 'none';
-        btn.classList.toggle('active', show && isAiVoiceModeEnabled(username));
     }
 
     let aiVoiceFlow = null; // null when idle, else { peer, sentences, idx, mode, recognition }
@@ -15111,7 +15101,6 @@ void main(){
         currentActiveUser = username;
         stopNearbyCountdownInterval();
         currentNearbyMatchId = null; // mutually exclusive with a regular chat
-        syncAiVoiceToggleBtn(username);
 
         const panel = document.getElementById('chatPanel');
         panel.classList.remove('no-active-chat');
