@@ -14,6 +14,42 @@ const cookieParser = require('cookie-parser');
 const { rateLimit } = require('express-rate-limit');
 
 const app = express();
+
+// The only hop between this server and the internet is the cloudflared tunnel
+// container on the same Docker network, so trusting exactly one proxy hop gives
+// accurate per-visitor IPs (from X-Forwarded-For) without trusting arbitrary
+// spoofed headers from further upstream. Without this, every visitor's request
+// looks like it comes from the tunnel container's own address, so IP-based rate
+// limits (login, signup, etc.) end up shared across all visitors combined
+// instead of per-person.
+app.set('trust proxy', 1);
+
+// Gates every request to the site behind a single shared HTTP Basic Auth
+// prompt -- this app has no per-visitor access control of its own before
+// account signup, so without this the whole thing (including the AI chat
+// endpoint, which costs real API quota per message) is open to the public.
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || null;
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || null;
+if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
+    const expectedUser = Buffer.from(BASIC_AUTH_USER);
+    const expectedPass = Buffer.from(BASIC_AUTH_PASS);
+    app.use((req, res, next) => {
+        const header = req.headers.authorization || '';
+        const [scheme, encoded] = header.split(' ');
+        if (scheme === 'Basic' && encoded) {
+            const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+            const sepIdx = decoded.indexOf(':');
+            const user = Buffer.from(decoded.slice(0, sepIdx));
+            const pass = Buffer.from(decoded.slice(sepIdx + 1));
+            const userOk = user.length === expectedUser.length && crypto.timingSafeEqual(user, expectedUser);
+            const passOk = pass.length === expectedPass.length && crypto.timingSafeEqual(pass, expectedPass);
+            if (userOk && passOk) return next();
+        }
+        res.set('WWW-Authenticate', 'Basic realm="HAI"');
+        res.status(401).send('Authentication required');
+    });
+}
+
 app.use(express.json({ limit: '25mb' })); // encrypted email backups can be several MB base64-encoded
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -636,11 +672,11 @@ const OLLAMA_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || 'llama3.2';
 // Locally (docker-compose), OLLAMA_URL alone is set and this stays unused.
 const OLLAMA_LOCAL_URL = process.env.OLLAMA_LOCAL_URL || null;
 const OLLAMA_LOCAL_SECRET = process.env.OLLAMA_LOCAL_SECRET || null;
-// Groq fallback -- only reached if every Ollama endpoint above is unreachable
+// Gemini fallback -- only reached if every Ollama endpoint above is unreachable
 // (e.g. the home PC or its tunnel is offline). Unlike Ollama, this sends message
 // text to a third-party API, so it's a deliberate last resort, not a preference.
-const GROQ_API_KEY = process.env.GROQ_API_KEY || null;
-const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'llama-3.1-8b-instant';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
+const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.6-flash';
 const H_EMOTIONS = ['happy', 'excited', 'calm', 'curious', 'concerned', 'sad', 'neutral'];
 const H_SYSTEM_PROMPT = 'You are H, a friendly AI assistant on the HAI Messenger website. ' +
     'Keep answers short, warm, and conversational -- a few sentences at most unless the visitor ' +
@@ -653,12 +689,12 @@ const H_SYSTEM_PROMPT = 'You are H, a friendly AI assistant on the HAI Messenger
     'Q: What is Claude?\n' +
     'A: Claude is an AI model family made by the company Anthropic.\n' +
     'Q: What is Gemini?\n' +
-    'A: Gemini is an AI model family made by Google.\n' +
+    'A: Gemini is an AI model family made by Google. H herself runs on Gemini.\n' +
     'Q: What is Grok?\n' +
     'A: Grok is an AI model family made by the company xAI, founded by Elon Musk.\n' +
     'Q: What is Ollama?\n' +
     'A: Ollama is an open-source tool for running AI models locally on someone\'s own computer instead ' +
-    'of through a cloud API. H herself runs through Ollama, locally, on this server.\n\n' +
+    'of through a cloud API.\n\n' +
     'FALLBACK RULE -- only if the visitor uses some OTHER word, name, or term that is not one of the ' +
     'topics above and you genuinely do not recognize it, respond with EXACTLY this phrase (filling in ' +
     'the term, verbatim, no paraphrasing): "I\'m not sure what you mean by \'<term>\'." Never use that ' +
@@ -685,7 +721,7 @@ async function fetchWithTimeout(url, opts, timeoutMs) {
 }
 
 // Tries every configured Ollama endpoint in order (local docker path, then the
-// tunneled home-PC path), then Groq as a last resort. Returns the raw string
+// tunneled home-PC path), then Gemini as a last resort. Returns the raw string
 // content from whichever provider answered first -- callers parse it the same
 // way regardless of source, since both are asked for the same JSON shape.
 async function getHReplyContent(messages) {
@@ -709,19 +745,19 @@ async function getHReplyContent(messages) {
         }
     }
 
-    if (GROQ_API_KEY) {
-        const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+    if (GEMINI_API_KEY) {
+        const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
-            body: JSON.stringify({ model: GROQ_CHAT_MODEL, messages, response_format: { type: 'json_object' } }),
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GEMINI_API_KEY}` },
+            body: JSON.stringify({ model: GEMINI_CHAT_MODEL, messages, response_format: { type: 'json_object' } }),
         }, 15000);
-        if (!res.ok) throw new Error(`Groq responded ${res.status}`);
+        if (!res.ok) throw new Error(`Gemini responded ${res.status}`);
         const data = await res.json();
         const content = data?.choices?.[0]?.message?.content?.trim();
         if (content) return content;
     }
 
-    throw new Error('No H AI provider available (Ollama unreachable, Groq not configured)');
+    throw new Error('No H AI provider available (Ollama unreachable, Gemini not configured)');
 }
 
 app.post('/api/h-chat', ipLimitHChat, async (req, res) => {
@@ -1482,7 +1518,28 @@ app.post('/api/auth/backup-email', requireAuth, async (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] },
-    maxHttpBufferSize: 8 * 1024 * 1024 // allow encrypted photo/voice-note/document payloads through
+    maxHttpBufferSize: 8 * 1024 * 1024, // allow encrypted photo/voice-note/document payloads through
+    // Socket.IO attaches straight to the http server and never passes through the
+    // Express app, so the Basic Auth middleware above doesn't cover it -- without
+    // this, the auth gate could be bypassed entirely by talking to the socket
+    // handshake directly instead of loading the page first.
+    allowRequest: (req, callback) => {
+        if (!BASIC_AUTH_USER || !BASIC_AUTH_PASS) return callback(null, true);
+        const header = req.headers.authorization || '';
+        const [scheme, encoded] = header.split(' ');
+        if (scheme === 'Basic' && encoded) {
+            const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+            const sepIdx = decoded.indexOf(':');
+            const user = Buffer.from(decoded.slice(0, sepIdx));
+            const pass = Buffer.from(decoded.slice(sepIdx + 1));
+            const expectedUser = Buffer.from(BASIC_AUTH_USER);
+            const expectedPass = Buffer.from(BASIC_AUTH_PASS);
+            const userOk = user.length === expectedUser.length && crypto.timingSafeEqual(user, expectedUser);
+            const passOk = pass.length === expectedPass.length && crypto.timingSafeEqual(pass, expectedPass);
+            if (userOk && passOk) return callback(null, true);
+        }
+        callback(null, false);
+    }
 });
 
 const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
