@@ -675,6 +675,10 @@ const OLLAMA_LOCAL_SECRET = process.env.OLLAMA_LOCAL_SECRET || null;
 // Gemini fallback -- only reached if every Ollama endpoint above is unreachable
 // (e.g. the home PC or its tunnel is offline). Unlike Ollama, this sends message
 // text to a third-party API, so it's a deliberate last resort, not a preference.
+// Currently the ONLY configured provider (no OLLAMA_URL/OLLAMA_LOCAL_URL set in
+// production), so every H message goes to Gemini for now -- interim until H
+// moves back to a locally-hosted model on this server, per the plan discussed
+// 2026-08-18. Update the privacy.html/landing.html disclosures when that lands.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.6-flash';
 const H_EMOTIONS = ['happy', 'excited', 'calm', 'curious', 'concerned', 'sad', 'neutral'];
@@ -689,7 +693,8 @@ const H_SYSTEM_PROMPT = 'You are H, a friendly AI assistant on the HAI Messenger
     'Q: What is Claude?\n' +
     'A: Claude is an AI model family made by the company Anthropic.\n' +
     'Q: What is Gemini?\n' +
-    'A: Gemini is an AI model family made by Google. H herself runs on Gemini.\n' +
+    'A: Gemini is an AI model family made by Google. H herself currently runs on Gemini, as an interim ' +
+    'setup while she moves back to a locally-hosted model.\n' +
     'Q: What is Grok?\n' +
     'A: Grok is an AI model family made by the company xAI, founded by Elon Musk.\n' +
     'Q: What is Ollama?\n' +
