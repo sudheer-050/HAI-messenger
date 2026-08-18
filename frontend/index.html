@@ -3814,6 +3814,7 @@
                         <button type="button" class="chat-header-menu-btn" onclick="toggleHamburgerMenu(event)" title="Menu"><span data-icon="menu"></span><span id="hamburgerNotifyDot" class="hamburger-notify-dot"></span></button>
                         <div class="header-menu-dropdown hamburger-dropdown" id="hamburgerMenuDropdown">
                             <button type="button" onclick="hamburgerMenuProfile()"><span data-icon="user"></span> Profile</button>
+                            <button type="button" onclick="hamburgerMenuTalkToH()"><span data-icon="sparkle"></span> Talk to H</button>
                             <button type="button" onclick="openCreateGroupModal()"><span data-icon="users"></span> New Group</button>
                             <button type="button" onclick="openFriendsModal()"><span data-icon="userPlus"></span> Friend Requests<span id="friendRequestsBadge" class="friend-requests-badge" style="display:none;"></span></button>
                             <button type="button" onclick="openStatusAuxView()"><span data-icon="statusRing"></span> Status</button>
@@ -12957,6 +12958,10 @@ void main(){
     function hamburgerMenuProfile() {
         closeHamburgerMenu();
         openProfileCard(myUsername);
+    }
+    function hamburgerMenuTalkToH() {
+        closeHamburgerMenu();
+        window.location.href = '/h.html?from=app';
     }
     function hamburgerMenuSettings() {
         closeHamburgerMenu();
