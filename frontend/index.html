@@ -947,7 +947,7 @@
             display: none;
         }
 
-        .chat-header-actions { position: relative; }
+        .chat-header-actions { position: relative; margin-left: auto; }
         .chat-header-menu-btn {
             background: none;
             border: none;
@@ -1431,7 +1431,7 @@
             -webkit-backdrop-filter: var(--glass-blur);
             display: flex;
             flex-direction: row;
-            justify-content: space-between;
+            justify-content: flex-start;
             align-items: center;
             box-sizing: border-box;
             /* z-index > 0 so the header-menu dropdown (position:absolute inside here)
@@ -1439,6 +1439,14 @@
                context. Without this, DOM order puts #messages on top of the dropdown. */
             position: relative;
             z-index: 1;
+        }
+        /* Name/avatar block grows to fill the space between the (mobile-only) back
+           button and the actions on the right, so the title always sits pinned to
+           the left edge instead of floating wherever space-between happened to land
+           it (which looked centered once the back button ate space on mobile). */
+        #activeChatTargetDisplay {
+            flex: 1;
+            min-width: 0;
         }
 
         .btn-clear-chat {
