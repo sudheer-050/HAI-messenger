@@ -9590,7 +9590,7 @@ void main(){
 
             let hasConnectedBefore = false;
             socket.on('connect', () => {
-                socket.emit('register_user', { username: myUsername, publicKey: myExportedPublicKeyString });
+                socket.emit('register_user', { username: myUsername, publicKey: myExportedPublicKeyString, deviceId: myDeviceId });
 
                 // Socket.IO fires 'connect' again on every reconnect, not just the first
                 // time -- mobile browsers routinely drop the connection while backgrounded
