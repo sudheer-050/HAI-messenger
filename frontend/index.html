@@ -947,7 +947,7 @@
             display: none;
         }
 
-        .chat-header-actions { position: relative; margin-left: auto; display: flex; align-items: center; gap: 6px; }
+        .chat-header-actions { position: relative; margin-left: auto; }
         .chat-header-menu-btn {
             background: none;
             border: none;
@@ -966,16 +966,20 @@
 
 
         .global-voice-btn {
-            /* Lives in .chat-header-actions beside #chatMoreMenuBtn now, not floating. */
-            position: relative;
-            width: 36px;
-            height: 36px;
+            position: fixed;
+            /* Desktop: beside the status FAB (left: 28px, 56px wide), to its right. */
+            left: 94px;
+            right: auto;
+            bottom: 28px;
+            z-index: 40;
+            width: 52px;
+            height: 52px;
             border-radius: 50%;
             border: none;
             background: var(--glass-strong);
             backdrop-filter: var(--glass-blur);
             -webkit-backdrop-filter: var(--glass-blur);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
             color: var(--text-muted);
             display: flex;
             align-items: center;
@@ -986,7 +990,7 @@
             transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
         }
         .global-voice-btn:hover { transform: scale(1.05); color: var(--text-normal); }
-        .global-voice-btn .icon { width: 18px; height: 18px; }
+        .global-voice-btn .icon { width: 22px; height: 22px; }
         .global-voice-btn canvas {
             display: block;
             width: 100%;
@@ -3308,6 +3312,154 @@
             z-index: 2000;
         }
 
+        /* FLOATING STATUS BUBBLE — Apple "Liquid Glass" styling: a translucent,
+           blurred, specular-highlighted surface rather than a flat colored button.
+           Light theme leans on a pale frosted glass; dark theme swaps to a dark
+           frosted glass so the blur still reads against a dark backdrop. */
+        .status-fab-wrap {
+            position: fixed;
+            left: 28px;
+            right: auto;
+            bottom: 28px;
+            z-index: 500;
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-fab-btn {
+            width: 56px;
+            height: 56px;
+            min-width: 56px;
+            border-radius: 50%;
+            /* A colored glass, not a near-white one -- against a plain white page this
+               is the only thing that has to be spottable at a glance from across the
+               screen, so it can't afford to blend into the backdrop the way a
+               subtler surface (sidebar, cards) can. */
+            background: linear-gradient(135deg, rgba(108, 93, 211, 0.85), rgba(88, 71, 184, 0.85));
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 8px 24px rgba(108, 93, 211, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.5), inset 0 -6px 10px rgba(0, 0, 0, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            cursor: pointer;
+            position: relative;
+            transition: transform 0.15s ease, box-shadow 0.25s ease;
+        }
+        :root[data-theme="dark"] .status-fab-btn {
+            background: linear-gradient(135deg, rgba(108, 93, 211, 0.9), rgba(30, 25, 60, 0.9));
+            border-color: rgba(255, 255, 255, 0.14);
+            box-shadow: 0 8px 24px rgba(108, 93, 211, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+        }
+        .status-fab-btn .icon { width: 24px; height: 24px; }
+        .status-fab-btn:hover { transform: scale(1.07); }
+        .status-fab-btn:active { transform: scale(0.93); }
+        .status-fab-btn.has-new {
+            animation: statusFabGlow 2s ease-in-out infinite;
+            border-color: rgba(224, 180, 0, 0.7);
+        }
+        @keyframes statusFabGlow {
+            0%, 100% { box-shadow: 0 8px 24px rgba(108, 93, 211, 0.45), 0 0 0 0 rgba(224, 180, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.5); }
+            50% { box-shadow: 0 8px 24px rgba(108, 93, 211, 0.45), 0 0 26px 8px rgba(224, 180, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.5); }
+        }
+        .status-fab-badge {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            background: var(--accent-red);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            min-width: 17px;
+            height: 17px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            border: 2px solid var(--bg-main);
+        }
+        /* Glass tray of status avatars -- collapsed to nothing by default, grows open
+           on hover (desktop only, see the media query below) via max-height, stacking
+           UPWARD above the anchor bubble (column-reverse on the wrap keeps the bubble
+           pinned at the true bottom-right corner while the tray is the item that grows). */
+        .status-fab-tray {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 0;
+            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            box-shadow: none;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.35s cubic-bezier(0.34, 1.15, 0.4, 1), opacity 0.25s ease, padding 0.35s ease, border-color 0.25s ease;
+            pointer-events: none;
+        }
+        :root[data-theme="dark"] .status-fab-tray {
+            background: rgba(40, 44, 52, 0.4);
+        }
+        .status-fab-wrap.expanded .status-fab-tray {
+            max-height: min(60vh, 420px);
+            opacity: 1;
+            padding: 10px 6px;
+            border-color: rgba(255, 255, 255, 0.55);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+            overflow-y: auto;
+            pointer-events: auto;
+        }
+        :root[data-theme="dark"] .status-fab-wrap.expanded .status-fab-tray { border-color: rgba(255, 255, 255, 0.14); }
+        .status-fab-tray-avatar {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            cursor: pointer;
+            padding: 2.5px;
+            background: linear-gradient(135deg, var(--accent-brand), var(--accent-gold));
+            transition: transform 0.15s ease;
+        }
+        .status-fab-tray-avatar:hover { transform: scale(1.1); }
+        .status-fab-tray-avatar.seen { background: rgba(150, 150, 150, 0.5); }
+        .status-fab-tray-avatar-inner {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background-color: var(--avatar-placeholder-bg);
+            background-size: cover;
+            background-position: center top;
+            border: 2px solid rgba(255, 255, 255, 0.7);
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 700;
+            font-size: 12px;
+        }
+        .status-fab-tray-avatar-inner .icon { width: 16px; height: 16px; }
+
+        @media (max-width: 768px) {
+            /* No hover on touch, so the tray can never open -- tapping the bubble goes
+               straight to the full Status view instead (see handleStatusFabClick).
+               Positioned high enough to clear the composer/safe-area at the bottom of
+               an open chat, and nudged in from the true corner. */
+            .status-fab-tray { display: none !important; }
+            .status-fab-wrap { left: auto; right: 16px; bottom: calc(120px + env(safe-area-inset-bottom)); }
+            .status-fab-btn { width: 50px; height: 50px; min-width: 50px; }
+            /* Mobile: beside the status FAB (right: 16px, 50px wide), to its left. */
+            .global-voice-btn { left: auto; right: 76px; bottom: calc(120px + env(safe-area-inset-bottom)); }
+        }
+
         /* ALL IN-PANEL AUX VIEWS (Profile/Trash/Settings/Friends) — same Liquid-Glass
            treatment as the Status panel below: a soft tinted backdrop behind the card
            for the glass to actually read against (the base .profile-card/.trash-card
@@ -3739,10 +3891,6 @@
                 <h2 style="margin: 0;">Select a conversation to start chatting</h2>
             </div>
             <div class="chat-header-actions">
-                <button type="button" class="global-voice-btn" id="globalVoiceControlBtn" title="Voice control" onclick="toggleGlobalVoiceControl()">
-                    <canvas id="globalVoiceCanvas" width="36" height="36" style="display:none;"></canvas>
-                    <span data-icon="mic" id="globalVoiceFallbackIcon"></span>
-                </button>
                 <button type="button" id="chatMoreMenuBtn" class="chat-header-menu-btn" data-icon="more" onclick="toggleHeaderMenu(event)"></button>
                 <div class="header-menu-dropdown" id="headerMenuDropdown">
                     <button type="button" onclick="headerMenuViewProfile()" id="headerMenuViewProfileBtn">View Profile</button>
@@ -4378,6 +4526,12 @@
 <!-- TOAST CONTAINER -->
 <div id="haiToastContainer"></div>
 
+<!-- GLOBAL VOICE CONTROL — always-visible mic toggle, independent of chat state -->
+<button type="button" class="global-voice-btn" id="globalVoiceControlBtn" style="display: none;" title="Voice control" onclick="toggleGlobalVoiceControl()">
+    <canvas id="globalVoiceCanvas" width="52" height="52" style="display:none;"></canvas>
+    <span data-icon="mic" id="globalVoiceFallbackIcon"></span>
+</button>
+
 <!-- REUSABLE CONFIRM DIALOG -->
 <div class="modal-overlay" id="haiConfirmOverlay">
     <div class="delete-choice-card">
@@ -4425,6 +4579,20 @@
     </div>
     <audio id="audioElement" controls style="height: 32px; filter: invert(0.9);"></audio>
     <span class="icon-btn-plain" data-icon="close" style="color: var(--text-muted);" onclick="closeAudioPlayer()"></span>
+</div>
+
+<!-- FLOATING STATUS BUBBLE — a corner glass FAB (frosted, translucent, iOS-style)
+     always sitting bottom-right once logged in. Glows when a friend has an unseen
+     Status. On desktop, hovering the whole widget grows a glass tray of everyone's
+     status avatars stacking UPWARD above it (see expandStatusFab/renderStatusFabTray)
+     so you can jump straight to one; on mobile the tray never opens (no hover there)
+     -- tapping the bubble goes straight to the full Status view (see handleStatusFabClick). -->
+<div class="status-fab-wrap" id="statusFabWrap" style="display: none;" onmouseenter="expandStatusFab()" onmouseleave="collapseStatusFab()">
+    <button type="button" class="status-fab-btn" id="statusFabBtn" onclick="handleStatusFabClick()" title="Status">
+        <span data-icon="statusRing"></span>
+        <span class="status-fab-badge" id="statusFabBadge" style="display: none;"></span>
+    </button>
+    <div class="status-fab-tray" id="statusFabTray"></div>
 </div>
 
 <script>
@@ -8402,7 +8570,7 @@ void main(){
         const uResolution = gl.getUniformLocation(program, 'iResolution');
         const uTime = gl.getUniformLocation(program, 'iTime');
 
-        const dim = canvas.width; // 36, set in markup
+        const dim = canvas.width; // 52, set in markup
         gl.viewport(0, 0, dim, dim);
 
         let raf = 0;
@@ -8439,9 +8607,8 @@ void main(){
     }
 
     /* GLOBAL VOICE CONTROL — a Siri-like always-listening command layer, distinct
-       from the per-chat AI Voice Mode above. Started/stopped via
-       #globalVoiceControlBtn, which lives in the chat header next to the three-dot
-       menu (mic permission needs one real user gesture; true
+       from the per-chat AI Voice Mode above. Started/stopped via the floating
+       #globalVoiceControlBtn (mic permission needs one real user gesture; true
        voice-only cold start isn't possible) and kept alive by restarting the
        recognizer every time the browser's own session ends, until the user says
        "stop voice command" or taps the button off. */
@@ -9368,6 +9535,8 @@ void main(){
                     document.getElementById('setup').style.display = 'none';
                     document.getElementById('sidebarPanel').style.display = 'flex';
                     document.getElementById('chatPanel').style.display = 'flex';
+                    document.getElementById('statusFabWrap').style.display = 'flex';
+                    document.getElementById('globalVoiceControlBtn').style.display = 'flex';
                     initSiriWaveButton();
                     document.getElementById('myHandleDisplay').innerText = "@" + myUsername;
                     document.getElementById('chatPanel').classList.add('no-active-chat');
@@ -9381,6 +9550,7 @@ void main(){
 
                 updateSidebarProfileAvatar();
                 renderSidebarContacts();
+                updateStatusFabState();
             });
 
             socket.on('receive_private_message', async (data) => {
@@ -9400,6 +9570,7 @@ void main(){
                         else contactStatuses[data.sender].push({ ...statusPayload, viewed: false });
                         await persistContactStatuses();
                         if (!isChatMuted(data.sender)) playNotificationSound();
+                        updateStatusFabState(); // glow/badge the floating bubble right away
 
                         // Live-refresh whatever's currently showing this person's status
                         // ring/count rather than leaving it stale until next opened.
@@ -9436,6 +9607,7 @@ void main(){
                 if (contactStatuses[sender].length === before) return; // wasn't cached locally, nothing to do
                 if (!contactStatuses[sender].length) delete contactStatuses[sender];
                 persistContactStatuses();
+                updateStatusFabState();
                 refreshOpenStatusFeedIfNeeded(sender);
             });
 
@@ -9929,6 +10101,9 @@ void main(){
         
         document.getElementById('sidebarPanel').style.display = 'none';
         document.getElementById('chatPanel').style.display = 'none';
+        collapseStatusFab();
+        document.getElementById('statusFabWrap').style.display = 'none';
+        document.getElementById('globalVoiceControlBtn').style.display = 'none';
         if (siriWaveHandle) { siriWaveHandle.stop(); siriWaveHandle = null; }
         document.getElementById('setup').style.display = 'flex';
     }
@@ -10239,6 +10414,7 @@ void main(){
             else if (contactStatuses[username].length !== before) theirsChanged = true;
         }
         if (theirsChanged) persistContactStatuses();
+        if (theirsChanged || myStatuses.length !== beforeMine) updateStatusFabState();
     }
     setInterval(purgeExpiredStatuses, 60 * 1000);
 
@@ -10362,7 +10538,7 @@ void main(){
         if (!isMe) {
             let changed = false;
             list.forEach(s => { if (!s.viewed) { s.viewed = true; changed = true; } });
-            if (changed) { persistContactStatuses(); }
+            if (changed) { persistContactStatuses(); updateStatusFabState(); }
         }
 
         statusFeedOpenUsername = username;
@@ -10413,6 +10589,7 @@ void main(){
         if (!(await showConfirm('Delete this status update? It will be removed from your device and from everyone who can currently see it.'))) return;
         myStatuses = myStatuses.filter(s => s.id !== statusId);
         persistMyStatuses();
+        updateStatusFabState();
         socket.emit('delete_status', { statusId });
         refreshOpenStatusFeedIfNeeded(myUsername);
     }
@@ -10504,6 +10681,7 @@ void main(){
 
         myStatuses.push(statusPayload);
         await persistMyStatuses();
+        updateStatusFabState();
         const returnToList = statusComposeReturnToList;
         closePostStatusModal();
 
@@ -10576,6 +10754,69 @@ void main(){
     function viewStatusFor(username) {
         openAuxPanel('status');
         showStatusFeed(username);
+    }
+
+    /* FLOATING STATUS BUBBLE (glass FAB) — the corner widget's own mini-avatar tray,
+       separate from the full Status list (renderStatusList) since it's sized and
+       styled for a small hover-reveal strip rather than a list row. */
+    function buildTrayAvatarBubble(username, isMe, hasUnseen) {
+        const profile = isMe ? profileStoreCache[username.toLowerCase()] : getKnownProfile(username);
+        const avatarStyle = (profile && profile.avatar) ? `background-image:url('${profile.avatar}');` : '';
+        const avatarInitial = (profile && profile.avatar) ? '' : username.charAt(0).toUpperCase();
+        return `
+            <div class="status-fab-tray-avatar ${hasUnseen ? '' : 'seen'}" title="${isMe ? 'My Status' : '@' + username}" onclick="collapseStatusFab(); viewStatusFor('${username}');">
+                <div class="status-fab-tray-avatar-inner" style="${avatarStyle}">${avatarInitial}</div>
+            </div>
+        `;
+    }
+    function renderStatusFabTray() {
+        const tray = document.getElementById('statusFabTray');
+        if (!tray) return;
+        const now = Date.now();
+        const myActive = myStatuses.filter(s => s.expiresAt > now);
+        const friendUsernames = getFriendsWithActiveStatus()
+            .sort((a, b) => Math.max(...contactStatuses[b].map(s => s.postedAt)) - Math.max(...contactStatuses[a].map(s => s.postedAt)));
+
+        let html = myActive.length
+            ? buildTrayAvatarBubble(myUsername, true, false)
+            : `<div class="status-fab-tray-avatar" title="Add to My Status" onclick="collapseStatusFab(); openPostStatusModal();"><div class="status-fab-tray-avatar-inner" style="background: var(--accent-brand);">${icon('plus')}</div></div>`;
+        friendUsernames.forEach(u => {
+            const statuses = contactStatuses[u].filter(s => s.expiresAt > now);
+            html += buildTrayAvatarBubble(u, false, statuses.some(s => !s.viewed));
+        });
+        tray.innerHTML = html;
+    }
+    function expandStatusFab() {
+        if (window.innerWidth <= 768) return; // no hover on touch -- tray stays closed, see the mobile media query
+        renderStatusFabTray();
+        document.getElementById('statusFabWrap').classList.add('expanded');
+    }
+    function collapseStatusFab() {
+        const wrap = document.getElementById('statusFabWrap');
+        if (wrap) wrap.classList.remove('expanded');
+    }
+    function handleStatusFabClick() {
+        collapseStatusFab();
+        openStatusAuxView();
+    }
+    // Keeps the bubble's glow/badge (and an already-open tray) in sync -- called
+    // whenever contactStatuses changes: initial load, a new status arriving live,
+    // expiry sweeps, and marking someone's updates viewed.
+    function updateStatusFabState() {
+        const wrap = document.getElementById('statusFabWrap');
+        const btn = document.getElementById('statusFabBtn');
+        const badge = document.getElementById('statusFabBadge');
+        if (!wrap || !btn || !myUsername) return;
+        const now = Date.now();
+        let unseenCount = 0;
+        for (const u in contactStatuses) {
+            if (!friendsSet.has(u)) continue;
+            unseenCount += contactStatuses[u].filter(s => s.expiresAt > now && !s.viewed).length;
+        }
+        btn.classList.toggle('has-new', unseenCount > 0);
+        badge.style.display = unseenCount > 0 ? 'flex' : 'none';
+        badge.innerText = unseenCount > 9 ? '9+' : String(unseenCount);
+        if (wrap.classList.contains('expanded')) renderStatusFabTray();
     }
 
     /* PROFILE STORE — about/avatar/cover/interests/name/appearance & notification
