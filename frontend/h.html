@@ -52,7 +52,12 @@
             color: var(--text-muted); text-decoration: none; flex-shrink: 0;
             transition: background 0.15s ease, color 0.15s ease;
         }
-        .back-link:hover { background: var(--glass-weak); color: var(--text-normal); }
+        .back-link:hover {
+            background: var(--glass-weak);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            color: var(--text-normal);
+        }
         .header-avatar {
             width: 32px; height: 32px; border-radius: 50%; background: var(--accent-brand);
             display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0;
@@ -65,26 +70,40 @@
             color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
             transition: background 0.15s ease, color 0.15s ease;
         }
-        .history-toggle-btn:hover, .history-toggle-btn.active { background: var(--glass-weak); color: var(--accent-brand); }
+        .history-toggle-btn:hover, .history-toggle-btn.active {
+            background: var(--glass-weak);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            color: var(--accent-brand);
+        }
         .history-toggle-btn svg { width: 18px; height: 18px; }
 
         /* MODE TOGGLE -- centered, morphing pill indicator slides between the two
-           labels instead of the background just flipping instantly. */
+           labels instead of the background just flipping instantly. Liquid Glass:
+           blurred/saturated translucent track (matches .status-fab-tray in
+           index.html) with a colored glass indicator pill carrying its own
+           specular highlight, rather than a flat solid fill. */
         .mode-toggle {
             position: relative;
             display: flex;
             background: var(--glass-weak);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--glass-border);
             border-radius: 999px;
             padding: 3px;
             width: 148px;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08);
         }
         .mode-toggle-indicator {
             position: absolute;
             top: 3px; left: 3px;
             width: calc(50% - 3px);
             height: calc(100% - 6px);
-            background: var(--accent-brand);
+            background: linear-gradient(135deg, rgba(155, 138, 251, 0.95), rgba(129, 113, 232, 0.95));
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 4px 14px rgba(108, 93, 211, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.35);
             border-radius: 999px;
             transition: transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
@@ -156,7 +175,13 @@
 
         /* HISTORY / TRANSCRIPT PANEL -- toggled by the header button, positioned
            centered horizontally and low (near the bottom) per request, so it reads
-           as a drawer sliding up rather than a top-anchored modal. */
+           as a drawer sliding up rather than a top-anchored modal. Liquid Glass:
+           translucent blurred surface (matches .status-fab-tray / .setup-card in
+           index.html) instead of a flat solid fill, with a specular highlight on
+           the top inner edge. backdrop-filter only pays its recomposition cost
+           while the drawer is actually open (opacity 0 + pointer-events none the
+           rest of the time), so it doesn't add per-frame cost to the orb shader,
+           which keeps running underneath at its own rAF pace either way. */
         #historyPanel {
             position: absolute;
             left: 50%;
@@ -164,10 +189,12 @@
             transform: translate(-50%, 16px);
             width: min(520px, calc(100vw - 32px));
             max-height: min(60vh, 480px);
-            background: var(--bg-sidebar);
+            background: var(--glass-strong);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--glass-border);
             border-radius: 20px;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1);
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -187,7 +214,12 @@
             width: 30px; height: 30px; border-radius: 50%; border: none; background: transparent;
             color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
         }
-        .history-icon-btn:hover { background: var(--glass-weak); color: var(--text-normal); }
+        .history-icon-btn:hover {
+            background: var(--glass-weak);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            color: var(--text-normal);
+        }
         .history-icon-btn svg { width: 15px; height: 15px; }
         #historyList { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
         #historyList .msg { max-width: 88%; font-size: 13px; }
