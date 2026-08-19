@@ -887,10 +887,16 @@ app.patch('/api/auth/profile', requireAuth, async (req, res) => {
 /* FRIEND REQUESTS — REST rather than sockets so the flow works the same whether or not
    the caller is currently connected; real-time pushes to the other party (when they're
    online) are layered on top via the socket registry populated in register_user below. */
+
+// Returns all active socket IDs for a user (one per connected device).
+async function getUserSockets(username) {
+    return redisClient.hVals(`user:${username}:sockets`);
+}
+
 async function pushToUserSocket(username, event, payload) {
     try {
-        const socketId = await redisClient.get(`user:${username}:socket`);
-        if (socketId) io.to(socketId).emit(event, payload);
+        const sockets = await getUserSockets(username);
+        for (const sid of sockets) io.to(sid).emit(event, payload);
     } catch (err) {
         console.error(`pushToUserSocket(${event}) failed:`, err.message);
     }
@@ -1627,8 +1633,7 @@ async function expireNearbyMatch(matchId) {
     await redisClient.sRem('nearby:active_matches', matchId);
 
     for (const username of [match.userA, match.userB]) {
-        const socketId = await redisClient.get(`user:${username}:socket`);
-        if (socketId) io.to(socketId).emit('nearby_match_expired', { matchId });
+        for (const sid of await getUserSockets(username)) io.to(sid).emit('nearby_match_expired', { matchId });
     }
 }
 
@@ -2253,8 +2258,10 @@ io.on('connection', (socket) => {
 
         socket.username = decoded.username;
         data = { ...data, username: decoded.username };
-        await redisClient.set(`user:${data.username}:socket`, socket.id);
-        await redisClient.set(`user:${data.username}:pubkey`, data.publicKey);
+        // Register this device's socket and public key in per-user HASHes.
+        // Key is socket.id (proxy for device until a stable deviceId is introduced).
+        await redisClient.hSet(`user:${data.username}:sockets`, socket.id, socket.id);
+        if (data.publicKey) await redisClient.hSet(`user:${data.username}:pubkeys`, socket.id, data.publicKey);
 
         // Cache this user's last-seen privacy preference in Redis so the hot presence
         // paths below (and get_user_public_key/disconnect) never need a Postgres round trip.
@@ -2320,9 +2327,8 @@ io.on('connection', (socket) => {
                 socket.emit('group_message_status_update', { groupId: payload.groupId, id: payload.id, reader: payload.reader });
             } else {
                 socket.emit('receive_private_message', payload);
-                const senderSocketId = await redisClient.get(`user:${payload.sender}:socket`);
-                if (senderSocketId) {
-                    io.to(senderSocketId).emit('message_status_update', { id: payload.id, peer: data.username, status: 'delivered' });
+                for (const sid of await getUserSockets(payload.sender)) {
+                    io.to(sid).emit('message_status_update', { id: payload.id, peer: data.username, status: 'delivered' });
                 }
             }
         }
@@ -2335,8 +2341,11 @@ io.on('connection', (socket) => {
     });
 
     // Provide public keys AND current live status upon request!
+    // Returns the first available device key; the fan-out encryption sub-issue will
+    // evolve this to return all per-device keys once the frontend supports it.
     socket.on('get_user_public_key', async (username, callback) => {
-        const pubKey = await redisClient.get(`user:${username}:pubkey`);
+        const pubKeys = await redisClient.hVals(`user:${username}:pubkeys`);
+        const pubKey = pubKeys[0] || null;
         
         // 🌟 TARGETED STATUS CHECK: Fetch their real-time state flags out of Redis directly
         const isOnlineStr = await redisClient.get(`user:${username}:online`);
@@ -2364,7 +2373,7 @@ io.on('connection', (socket) => {
             return;
         }
 
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
+        const targetSockets = await getUserSockets(data.targetUsername);
 
         const payload = {
             kind: 'message',
@@ -2378,8 +2387,8 @@ io.on('connection', (socket) => {
             status: !!data.status
         };
 
-        if (targetSocketId) {
-            io.to(targetSocketId).emit('receive_private_message', payload);
+        if (targetSockets.length) {
+            for (const sid of targetSockets) io.to(sid).emit('receive_private_message', payload);
             // Recipient is connected right now, so the message is immediately "delivered"
             socket.emit('message_status_update', { id: data.id, peer: data.targetUsername, status: 'delivered' });
             console.log(`📬 Message successfully routed from ${socket.username} to ${data.targetUsername}`);
@@ -2401,11 +2410,11 @@ io.on('connection', (socket) => {
     // Edit a previously-sent text message — same online/offline pattern as send_private_message
     socket.on('edit_message', async (data) => {
         if (!data.id || !data.targetUsername || !data.encryptedMessage) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
+        const targetSockets = await getUserSockets(data.targetUsername);
         const payload = { kind: 'edit', id: data.id, sender: socket.username, encryptedMessage: data.encryptedMessage };
 
-        if (targetSocketId) {
-            io.to(targetSocketId).emit('message_edited', payload);
+        if (targetSockets.length) {
+            for (const sid of targetSockets) io.to(sid).emit('message_edited', payload);
         } else {
             await queueForOfflineUser(data.targetUsername, payload);
         }
@@ -2414,11 +2423,11 @@ io.on('connection', (socket) => {
     // Delete a message for both participants — same online/offline pattern
     socket.on('delete_message_everyone', async (data) => {
         if (!data.id || !data.targetUsername) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
+        const targetSockets = await getUserSockets(data.targetUsername);
         const payload = { kind: 'delete', id: data.id, sender: socket.username };
 
-        if (targetSocketId) {
-            io.to(targetSocketId).emit('message_deleted_everyone', payload);
+        if (targetSockets.length) {
+            for (const sid of targetSockets) io.to(sid).emit('message_deleted_everyone', payload);
         } else {
             await queueForOfflineUser(data.targetUsername, payload);
         }
@@ -2428,11 +2437,11 @@ io.on('connection', (socket) => {
     // same online/offline pattern as edit_message
     socket.on('react_message', async (data) => {
         if (!data.id || !data.targetUsername) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
+        const targetSockets = await getUserSockets(data.targetUsername);
         const payload = { kind: 'reaction', id: data.id, sender: socket.username, emoji: data.emoji || null };
 
-        if (targetSocketId) {
-            io.to(targetSocketId).emit('message_reacted', payload);
+        if (targetSockets.length) {
+            for (const sid of targetSockets) io.to(sid).emit('message_reacted', payload);
         } else {
             await queueForOfflineUser(data.targetUsername, payload);
         }
@@ -2452,9 +2461,9 @@ io.on('connection', (socket) => {
             const payload = { kind: 'status_delete', id: data.statusId, sender: socket.username };
             for (const row of friendRows.rows) {
                 const target = row.user_a === socket.username ? row.user_b : row.user_a;
-                const targetSocketId = await redisClient.get(`user:${target}:socket`);
-                if (targetSocketId) {
-                    io.to(targetSocketId).emit('status_deleted', payload);
+                const targetSockets = await getUserSockets(target);
+                if (targetSockets.length) {
+                    for (const sid of targetSockets) io.to(sid).emit('status_deleted', payload);
                 } else {
                     await queueForOfflineUser(target, payload);
                 }
@@ -2492,9 +2501,9 @@ io.on('connection', (socket) => {
                 replyToText: (data.replyRecipients && data.replyRecipients[targetUsername]) || null,
                 replyToId: data.replyToId || null
             };
-            const targetSocketId = await redisClient.get(`user:${targetUsername}:socket`);
-            if (targetSocketId) {
-                io.to(targetSocketId).emit('receive_group_message', payload);
+            const targetSockets = await getUserSockets(targetUsername);
+            if (targetSockets.length) {
+                for (const sid of targetSockets) io.to(sid).emit('receive_group_message', payload);
             } else {
                 await queueForOfflineUser(targetUsername, payload);
             }
@@ -2514,8 +2523,8 @@ io.on('connection', (socket) => {
         for (const [targetUsername, encryptedMessage] of Object.entries(data.recipients)) {
             if (targetUsername === socket.username) continue;
             const payload = { kind: 'group_edit', groupId: data.groupId, id: data.id, sender: socket.username, encryptedMessage };
-            const targetSocketId = await redisClient.get(`user:${targetUsername}:socket`);
-            if (targetSocketId) io.to(targetSocketId).emit('group_message_edited', payload);
+            const targetSockets = await getUserSockets(targetUsername);
+            if (targetSockets.length) for (const sid of targetSockets) io.to(sid).emit('group_message_edited', payload);
             else await queueForOfflineUser(targetUsername, payload);
         }
     });
@@ -2529,8 +2538,8 @@ io.on('connection', (socket) => {
         const payload = { kind: 'group_delete', groupId: data.groupId, id: data.id, sender: socket.username };
         for (const m of members) {
             if (m.username === socket.username) continue;
-            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
-            if (targetSocketId) io.to(targetSocketId).emit('group_message_deleted_everyone', payload);
+            const targetSockets = await getUserSockets(m.username);
+            if (targetSockets.length) for (const sid of targetSockets) io.to(sid).emit('group_message_deleted_everyone', payload);
             else await queueForOfflineUser(m.username, payload);
         }
     });
@@ -2544,8 +2553,8 @@ io.on('connection', (socket) => {
         const payload = { kind: 'group_reaction', groupId: data.groupId, id: data.id, sender: socket.username, emoji: data.emoji || null };
         for (const m of members) {
             if (m.username === socket.username) continue;
-            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
-            if (targetSocketId) io.to(targetSocketId).emit('group_message_reacted', payload);
+            const targetSockets = await getUserSockets(m.username);
+            if (targetSockets.length) for (const sid of targetSockets) io.to(sid).emit('group_message_reacted', payload);
             else await queueForOfflineUser(m.username, payload);
         }
     });
@@ -2561,9 +2570,9 @@ io.on('connection', (socket) => {
         for (const { id, sender } of data.reads) {
             if (!id || !sender || sender === socket.username) continue;
             const payload = { groupId: data.groupId, id, reader: socket.username };
-            const senderSocketId = await redisClient.get(`user:${sender}:socket`);
-            if (senderSocketId) {
-                io.to(senderSocketId).emit('group_message_status_update', payload);
+            const senderSockets = await getUserSockets(sender);
+            if (senderSockets.length) {
+                for (const sid of senderSockets) io.to(sid).emit('group_message_status_update', payload);
             } else {
                 await queueForOfflineUser(sender, { kind: 'group_read_receipt', ...payload });
             }
@@ -2577,8 +2586,7 @@ io.on('connection', (socket) => {
         const members = await getGroupMembers(data.groupId);
         for (const m of members) {
             if (m.username === socket.username) continue;
-            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
-            if (targetSocketId) io.to(targetSocketId).emit('group_typing_start', { groupId: data.groupId, sender: socket.username });
+            for (const sid of await getUserSockets(m.username)) io.to(sid).emit('group_typing_start', { groupId: data.groupId, sender: socket.username });
         }
     });
     socket.on('group_typing_stop', async (data) => {
@@ -2586,8 +2594,7 @@ io.on('connection', (socket) => {
         const members = await getGroupMembers(data.groupId);
         for (const m of members) {
             if (m.username === socket.username) continue;
-            const targetSocketId = await redisClient.get(`user:${m.username}:socket`);
-            if (targetSocketId) io.to(targetSocketId).emit('group_typing_stop', { groupId: data.groupId, sender: socket.username });
+            for (const sid of await getUserSockets(m.username)) io.to(sid).emit('group_typing_stop', { groupId: data.groupId, sender: socket.username });
         }
     });
 
@@ -2596,9 +2603,8 @@ io.on('connection', (socket) => {
     // the recipient comes back online minutes later wouldn't make sense.
     socket.on('game_event', async (data) => {
         if (!data.targetUsername || !data.gameType || !data.payload) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
-        if (targetSocketId) {
-            io.to(targetSocketId).emit('game_event', { sender: socket.username, gameType: data.gameType, payload: data.payload });
+        for (const sid of await getUserSockets(data.targetUsername)) {
+            io.to(sid).emit('game_event', { sender: socket.username, gameType: data.gameType, payload: data.payload });
         }
         // Only whitelist-validated game types to keep event_type bounded to safe values.
         // 'accept' = guest accepted the invite = game genuinely begins; 'leave' = game ended.
@@ -2618,19 +2624,18 @@ io.on('connection', (socket) => {
     // nothing to relay to, so the viewer is told immediately instead of hanging.
     socket.on('request_profile', async (data) => {
         if (!data || !data.targetUsername || !data.requestId) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
-        if (!targetSocketId) {
+        const targetSockets = await getUserSockets(data.targetUsername);
+        if (!targetSockets.length) {
             socket.emit('profile_response', { requestId: data.requestId, fromUsername: data.targetUsername, online: false, profile: null });
             return;
         }
-        io.to(targetSocketId).emit('profile_requested', { requesterUsername: socket.username, requestId: data.requestId });
+        for (const sid of targetSockets) io.to(sid).emit('profile_requested', { requesterUsername: socket.username, requestId: data.requestId });
     });
 
     socket.on('submit_profile_response', async (data) => {
         if (!data || !data.requesterUsername || !data.requestId) return;
-        const requesterSocketId = await redisClient.get(`user:${data.requesterUsername}:socket`);
-        if (requesterSocketId) {
-            io.to(requesterSocketId).emit('profile_response', {
+        for (const sid of await getUserSockets(data.requesterUsername)) {
+            io.to(sid).emit('profile_response', {
                 requestId: data.requestId,
                 fromUsername: socket.username,
                 online: true,
@@ -2683,8 +2688,8 @@ io.on('connection', (socket) => {
         const targetUsername = await redisClient.get(`nearby:viewer:${me}:byalias:${data.toAliasId}`);
         if (!targetUsername) return callback({ error: 'That person is no longer available.' });
 
-        const targetSocketId = await redisClient.get(`user:${targetUsername}:socket`);
-        if (!targetSocketId) return callback({ error: 'That person just went offline.' });
+        const targetSockets = await getUserSockets(targetUsername);
+        if (!targetSockets.length) return callback({ error: 'That person just went offline.' });
 
         const aliasOfMeForTarget = await getOrCreateNearbyAlias(targetUsername, me);
         const requestId = crypto.randomUUID();
@@ -2695,7 +2700,7 @@ io.on('connection', (socket) => {
             fromEphemeralPubKey: data.myEphemeralPubKey
         }), { EX: 60 * 10 }); // 10 minutes to respond before the request goes stale
 
-        io.to(targetSocketId).emit('nearby_request_received', {
+        for (const sid of targetSockets) io.to(sid).emit('nearby_request_received', {
             requestId,
             fromAlias: aliasOfMeForTarget.alias,
             fromColor: aliasOfMeForTarget.color
@@ -2714,14 +2719,14 @@ io.on('connection', (socket) => {
         if (request.to !== me) return callback({ error: 'Not your request.' });
         await redisClient.del(`nearby:request:${data.requestId}`);
 
-        const requesterSocketId = await redisClient.get(`user:${request.from}:socket`);
+        const requesterSockets = await getUserSockets(request.from);
 
         if (!data.accept) {
-            if (requesterSocketId) io.to(requesterSocketId).emit('nearby_request_declined', { requestId: data.requestId });
+            for (const sid of requesterSockets) io.to(sid).emit('nearby_request_declined', { requestId: data.requestId });
             return callback({ ok: true });
         }
         if (!data.myEphemeralPubKey) return callback({ error: 'Missing key material.' });
-        if (!requesterSocketId) return callback({ error: 'They went offline before you accepted.' });
+        if (!requesterSockets.length) return callback({ error: 'They went offline before you accepted.' });
 
         const matchId = crypto.randomUUID();
         const expiresAt = Date.now() + NEARBY_MATCH_LIFETIME_MS;
@@ -2747,7 +2752,7 @@ io.on('connection', (socket) => {
         // pendingNearbyRequests[requestId]. Omitting it (as this did originally) means
         // the match is created fine server-side but silently never appears on either
         // client, since the lookup on data.requestId always misses.
-        io.to(requesterSocketId).emit('nearby_match_created', {
+        for (const sid of requesterSockets) io.to(sid).emit('nearby_match_created', {
             matchId, requestId: data.requestId, alias: aliasForA.alias, color: aliasForA.color, expiresAt,
             theirEphemeralPubKey: data.myEphemeralPubKey
         });
@@ -2773,24 +2778,20 @@ io.on('connection', (socket) => {
         }
 
         const otherUser = match.userA === me ? match.userB : match.userA;
-        const otherSocketId = await redisClient.get(`user:${otherUser}:socket`);
-        if (otherSocketId) {
-            io.to(otherSocketId).emit('nearby_message_received', { matchId: data.matchId, encryptedMessage: data.encryptedMessage });
-        }
-        callback({ ok: true, delivered: !!otherSocketId });
+        const otherSockets = await getUserSockets(otherUser);
+        for (const sid of otherSockets) io.to(sid).emit('nearby_message_received', { matchId: data.matchId, encryptedMessage: data.encryptedMessage });
+        callback({ ok: true, delivered: otherSockets.length > 0 });
     });
 
     // Typing indicators are ephemeral — relay only if the recipient is online right now,
     // never queued, since a "was typing" notice minutes later is meaningless.
     socket.on('typing_start', async (data) => {
         if (!data.targetUsername) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
-        if (targetSocketId) io.to(targetSocketId).emit('typing_start', { sender: socket.username });
+        for (const sid of await getUserSockets(data.targetUsername)) io.to(sid).emit('typing_start', { sender: socket.username });
     });
     socket.on('typing_stop', async (data) => {
         if (!data.targetUsername) return;
-        const targetSocketId = await redisClient.get(`user:${data.targetUsername}:socket`);
-        if (targetSocketId) io.to(targetSocketId).emit('typing_stop', { sender: socket.username });
+        for (const sid of await getUserSockets(data.targetUsername)) io.to(sid).emit('typing_stop', { sender: socket.username });
     });
 
     // Relay read receipts back to the original sender -- same online/offline-queue
@@ -2801,10 +2802,10 @@ io.on('connection', (socket) => {
     // reconnected. Queuing it means "already read" is durable, not a live-only signal.
     socket.on('mark_message_read', async (data) => {
         if (!data.peer || !Array.isArray(data.messageIds)) return;
-        const originalSenderSocketId = await redisClient.get(`user:${data.peer}:socket`);
-        if (originalSenderSocketId) {
+        const originalSenderSockets = await getUserSockets(data.peer);
+        if (originalSenderSockets.length) {
             data.messageIds.forEach(id => {
-                io.to(originalSenderSocketId).emit('message_status_update', { id, peer: socket.username, status: 'read' });
+                for (const sid of originalSenderSockets) io.to(sid).emit('message_status_update', { id, peer: socket.username, status: 'read' });
             });
         } else {
             for (const id of data.messageIds) {
@@ -2816,23 +2817,29 @@ io.on('connection', (socket) => {
     // Handle session termination cleanups
     socket.on('disconnect', async () => {
         if (socket.username) {
-            const now = Date.now();
+            // Remove only this device's entries; other devices stay connected.
+            await redisClient.hDel(`user:${socket.username}:sockets`, socket.id);
+            await redisClient.hDel(`user:${socket.username}:pubkeys`, socket.id);
 
-            await redisClient.set(`user:${socket.username}:online`, 'false');
-            await redisClient.set(`user:${socket.username}:lastSeen`, now.toString());
-            await redisClient.del(`user:${socket.username}:socket`);
-            await redisClient.sRem('online_users', socket.username);
+            const remainingSockets = await redisClient.hLen(`user:${socket.username}:sockets`);
+            if (remainingSockets === 0) {
+                // Last device disconnected — mark user fully offline.
+                const now = Date.now();
+                await redisClient.set(`user:${socket.username}:online`, 'false');
+                await redisClient.set(`user:${socket.username}:lastSeen`, now.toString());
+                await redisClient.sRem('online_users', socket.username);
 
-            const lastSeenVisibleStr = await redisClient.get(`user:${socket.username}:lastSeenVisible`);
-            const lastSeenVisible = lastSeenVisibleStr !== 'false';
+                const lastSeenVisibleStr = await redisClient.get(`user:${socket.username}:lastSeenVisible`);
+                const lastSeenVisible = lastSeenVisibleStr !== 'false';
 
-            io.emit('presence_broadcast_update', {
-                username: socket.username,
-                online: false,
-                lastSeen: lastSeenVisible ? now : null
-            });
+                io.emit('presence_broadcast_update', {
+                    username: socket.username,
+                    online: false,
+                    lastSeen: lastSeenVisible ? now : null
+                });
+            }
 
-            console.log(`🏃 User ${socket.username} has disconnected.`);
+            console.log(`🏃 User ${socket.username} has disconnected (${remainingSockets} device(s) still online).`);
         }
     });
 });
