@@ -4624,6 +4624,7 @@
     let myUsername = "";
     let isAdmin = false;
     let myKeyPair;
+    let myDeviceId = "";
     let myExportedPublicKeyString = "";
     let conversationHistory = {};
     let trashHistory = [];
@@ -9501,6 +9502,20 @@ void main(){
         row.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
     }
 
+    function getOrCreateDeviceId() {
+        let id = localStorage.getItem('hai_device_id');
+        if (!id) {
+            id = crypto.randomUUID
+                ? crypto.randomUUID()
+                : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                    const r = Math.random() * 16 | 0;
+                    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                });
+            localStorage.setItem('hai_device_id', id);
+        }
+        return id;
+    }
+
     async function startChatSession() {
         if (!window.crypto || !window.crypto.subtle) return showToast("🔒 Browser blocked Crypto API!", 'error');
 
@@ -9525,6 +9540,8 @@ void main(){
             await loadNearbyMatches();
             await loadStatuses();
             await loadRemoteProfileCache();
+
+            myDeviceId = getOrCreateDeviceId();
 
             // Fall back to the pre-rename key names if the new ones aren't there yet —
             // critical to check before ever generating a fresh keypair: a freshly
@@ -10142,7 +10159,7 @@ void main(){
         if (socket) {
             socket.disconnect();
         }
-        myUsername = ""; myKeyPair = null; myExportedPublicKeyString = ""; conversationHistory = {}; trashHistory = []; currentActiveUser = ""; unreadChats = []; unreadNotifications = {}; recentlyNotifiedUsers = new Set(); pendingReplyId = null;
+        myUsername = ""; myKeyPair = null; myDeviceId = ""; myExportedPublicKeyString = ""; conversationHistory = {}; trashHistory = []; currentActiveUser = ""; unreadChats = []; unreadNotifications = {}; recentlyNotifiedUsers = new Set(); pendingReplyId = null;
         document.getElementById('messages').innerHTML = "";
         document.getElementById('identityInput').value = "";
         document.getElementById('passwordInput').value = "";
