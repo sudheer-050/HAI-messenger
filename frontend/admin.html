@@ -23,6 +23,21 @@
         --accent-red: #e66767;
         --accent-green: #199e70;
         --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+        /* GLASS TOKENS -- same "Liquid Glass" material as frontend/index.html
+           (see the --glass-* tokens there), so admin panels read as the same
+           product rather than a flatter, unrelated back office. Admin stays
+           black-only by design (no light mode -- see body/.topbar below), so
+           there is a single dark glass recipe rather than light/dark pairs. */
+        --glass-blur: blur(24px) saturate(180%);
+        --glass-weak: rgba(255, 255, 255, 0.05);
+        --glass-strong: rgba(255, 255, 255, 0.08);
+        --glass-border: rgba(255, 255, 255, 0.12);
+        /* Near-opaque fallback for surfaces nested INSIDE another blurred
+           surface (e.g. a select sitting on a blurred modal-card): a nested
+           backdrop-filter can only sample its blurred ancestor's own
+           composited output, not real content behind it, so stacking glass on
+           glass just muddies both layers instead of reading as more depth. */
+        --menu-surface: rgba(13, 13, 16, 0.97);
         /* Chart-specific tokens (dataviz skill) -- gridlines/axis recessive against
            the card surface, distinct from --border which is used for UI chrome. */
         --chart-grid: #1a1a1e;
@@ -43,14 +58,17 @@
     /* TOP BAR */
     .topbar {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-card); flex-shrink: 0;
+        padding: 10px 20px; border-bottom: 1px solid var(--glass-border); flex-shrink: 0;
+        background: var(--glass-weak);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
     }
     .topbar-left { display: flex; align-items: center; gap: 10px; }
     .topbar-left h1 { font-size: 16px; margin: 0; font-weight: 700; }
     .topbar-badge { font-size: 11px; background: var(--accent-dim); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
     .topbar-right { display: flex; align-items: center; gap: 10px; }
     .btn {
-        border: 1px solid var(--border); background: var(--bg-card); color: var(--text-normal);
+        border: 1px solid var(--glass-border); background: var(--menu-surface); color: var(--text-normal);
         padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
     }
     .btn:hover { background: var(--accent-dim); }
@@ -62,8 +80,11 @@
     /* LAYOUT */
     .app-body { display: flex; flex: 1; min-height: 0; }
     .sidebar {
-        width: 220px; flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border);
+        width: 220px; flex-shrink: 0; border-right: 1px solid var(--glass-border);
         padding: 14px 10px; overflow-y: auto;
+        background: var(--glass-weak);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
     }
     .sidebar-heading { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 4px 8px 8px; }
     .dash-row {
@@ -81,7 +102,11 @@
 
     /* OVERVIEW CARDS */
     .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-    .overview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+    .overview-card {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 16px;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--shadow), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
     .overview-card .value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
     .overview-card .label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
@@ -96,8 +121,9 @@
     .stat-tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
     .stat-tile-grid-compact { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 10px; }
     .stat-tile {
-        background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
-        padding: 12px 14px; box-shadow: var(--shadow);
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 10px;
+        padding: 12px 14px; box-shadow: var(--shadow), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
     }
     .stat-tile .stat-value { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
     .stat-tile .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
@@ -105,14 +131,20 @@
     .stat-tile.status-good .stat-value { color: #59d68c; }
     .stat-tile.status-critical .stat-value { color: var(--accent-red); }
 
-    .chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+    .chart-card {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 16px;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--shadow), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
     .chart-canvas-wrap { position: relative; height: 200px; }
     .chart-canvas-wrap canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-    .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border); }
     .chart-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); }
     .chart-legend-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    /* Solid, not glass -- floats over an already-blurred .chart-card, see the
+       nested-backdrop-filter note on :root. */
     .chart-tooltip {
-        position: absolute; pointer-events: none; background: var(--bg-sidebar); border: 1px solid var(--border);
+        position: absolute; pointer-events: none; background: var(--menu-surface); border: 1px solid var(--glass-border);
         border-radius: 8px; padding: 6px 10px; font-size: 11.5px; box-shadow: var(--shadow); white-space: nowrap;
         transform: translate(-50%, -110%); opacity: 0; transition: opacity 0.1s ease; z-index: 5;
     }
@@ -120,13 +152,17 @@
     .chart-tooltip .tt-label { color: var(--text-muted); }
     .chart-tooltip .tt-value { font-weight: 700; font-variant-numeric: tabular-nums; }
 
-    .retention-table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 6px 14px; box-shadow: var(--shadow); overflow-x: auto; }
+    .retention-table-wrap {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 12px; padding: 6px 14px; overflow-x: auto;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--shadow), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
     .retention-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .retention-table th { text-align: left; font-weight: 600; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 1px solid var(--border); }
-    .retention-table td { padding: 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+    .retention-table th { text-align: left; font-weight: 600; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 1px solid var(--glass-border); }
+    .retention-table td { padding: 8px; border-bottom: 1px solid var(--glass-border); font-variant-numeric: tabular-nums; }
     .retention-table tr:last-child td { border-bottom: none; }
     .retention-cell { display: flex; align-items: center; gap: 6px; }
-    .retention-bar-track { width: 46px; height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; flex-shrink: 0; }
+    .retention-bar-track { width: 46px; height: 5px; border-radius: 3px; background: var(--glass-border); overflow: hidden; flex-shrink: 0; }
     .retention-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
     .retention-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
@@ -138,8 +174,9 @@
     /* WIDGET GRID */
     .widget-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
     .widget-card {
-        background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
-        box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 190px;
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 16px;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--shadow), inset 0 1px 1px rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; min-height: 190px;
     }
     .widget-card.dragging { opacity: 0.4; }
     .widget-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 6px; cursor: grab; }
@@ -155,27 +192,47 @@
 
     .add-widget-card {
         display: flex; align-items: center; justify-content: center; min-height: 190px;
-        border: 1.5px dashed var(--border); border-radius: 12px; cursor: pointer; color: var(--text-muted); font-size: 13px; font-weight: 600;
+        border: 1.5px dashed var(--glass-border); border-radius: 12px; cursor: pointer; color: var(--text-muted); font-size: 13px; font-weight: 600;
+        background: var(--glass-weak);
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
     }
     .add-widget-card:hover { border-color: var(--accent); color: var(--accent); }
 
     .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 
-    /* MODALS */
-    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(10, 14, 18, 0.45); align-items: center; justify-content: center; z-index: 100; }
+    /* MODALS -- dim overlay + floating glass card, same two-layer pairing as
+       every .modal-overlay > .delete-choice-card in index.html: the overlay's
+       own blur softens the app shell behind it, and the card's blur is a
+       second, independent glass surface floating on top of that dim, not a
+       readback of it. */
+    .modal-overlay {
+        display: none; position: fixed; inset: 0; align-items: center; justify-content: center; z-index: 100;
+        background: rgba(10, 14, 18, 0.45);
+        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
     .modal-overlay.open { display: flex; }
-    .modal-card { background: var(--bg-card); border-radius: 14px; padding: 20px; width: 380px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    .modal-card {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 14px; padding: 20px;
+        width: 380px; max-width: 92vw; max-height: 86vh; overflow-y: auto;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: 0 10px 40px rgba(0,0,0,0.25), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
     .modal-card h3 { margin: 0 0 14px; font-size: 16px; }
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+    /* Solid, not glass -- these sit on top of .modal-card, which is already
+       blurred, so a nested backdrop-filter here would only sample the card's
+       own composited surface rather than the app behind it (see --menu-surface
+       comment on :root). A flat near-opaque fill reads as the recessed input
+       well against the lighter glass card instead. */
     .form-group input, .form-group select {
-        width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
-        background: var(--bg-main); color: var(--text-normal); font-size: 13.5px;
+        width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--glass-border);
+        background: var(--menu-surface); color: var(--text-normal); font-size: 13.5px;
     }
     .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
     .reports-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
-    .report-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; }
+    .report-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--glass-border); border-radius: 8px; font-size: 12.5px; }
     .report-row-email { font-weight: 600; }
     .report-row-meta { color: var(--text-muted); font-size: 11px; }
     .note-banner { font-size: 12px; color: var(--text-muted); background: var(--accent-dim); padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; }
@@ -185,27 +242,47 @@
     .gate-screen h2 { margin: 0; }
     .gate-screen p { color: var(--text-muted); max-width: 360px; margin: 0; }
 
-    /* THEMED CONFIRM / PROMPT / TOAST — replaces native alert/confirm/prompt */
-    .hai-dialog-card { background: var(--bg-card); border-radius: 14px; padding: 20px 24px; width: 320px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.28); }
+    /* THEMED CONFIRM / PROMPT / TOAST — replaces native alert/confirm/prompt.
+       Both sit directly on the (unblurred) page/overlay, so they get the full
+       glass treatment same as .modal-card. */
+    .hai-dialog-card {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 14px; padding: 20px 24px;
+        width: 320px; max-width: 92vw;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: 0 10px 40px rgba(0,0,0,0.28), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
     .hai-dialog-card p { margin: 0 0 16px; font-size: 13px; color: var(--text-normal); white-space: pre-line; text-align: center; line-height: 1.5; }
     .hai-dialog-btns { display: flex; gap: 8px; justify-content: center; }
     .hai-toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-    .hai-toast { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; box-shadow: var(--shadow); pointer-events: all; cursor: pointer; white-space: nowrap; max-width: 340px; }
+    .hai-toast {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 8px; padding: 10px 16px; font-size: 13px;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--shadow), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+        pointer-events: all; cursor: pointer; white-space: nowrap; max-width: 340px;
+    }
     .hai-toast.error { border-color: var(--accent-red); color: var(--accent-red); }
 
     /* THEME EDITOR */
-    .sidebar-sep { height: 1px; background: var(--border); margin: 10px 6px; }
+    .sidebar-sep { height: 1px; background: var(--glass-border); margin: 10px 6px; }
     .theme-mode-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
-    .theme-mode-tab { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-main); color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .theme-mode-tab { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--menu-surface); color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
     .theme-mode-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
     .color-token-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .color-token-row { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .color-token-row {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 10px; padding: 12px 14px;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
     .color-token-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
     .color-token-inputs { display: flex; align-items: center; gap: 8px; }
-    .color-token-inputs input[type="color"] { width: 38px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--bg-main); flex-shrink: 0; }
-    .color-token-inputs input[type="text"] { flex: 1; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-main); color: var(--text-normal); font-size: 13px; font-family: monospace; }
-    .theme-preview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
-    .theme-preview-header { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 12px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.04em; }
+    .color-token-inputs input[type="color"] { width: 38px; height: 38px; padding: 2px; border: 1px solid var(--glass-border); border-radius: 8px; cursor: pointer; background: var(--menu-surface); flex-shrink: 0; }
+    .color-token-inputs input[type="text"] { flex: 1; padding: 7px 9px; border: 1px solid var(--glass-border); border-radius: 7px; background: var(--menu-surface); color: var(--text-normal); font-size: 13px; font-family: monospace; }
+    .theme-preview-card {
+        background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 12px; overflow: hidden; margin-bottom: 20px;
+        backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    }
+    .theme-preview-header { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 12px; border-bottom: 1px solid var(--glass-border); text-transform: uppercase; letter-spacing: 0.04em; }
     .theme-preview-mock { display: flex; height: 96px; }
     .theme-preview-sidebar { width: 64px; flex-shrink: 0; padding: 10px 8px; display: flex; flex-direction: column; gap: 5px; }
     .theme-preview-swatch { height: 7px; border-radius: 4px; background: rgba(128,128,128,0.3); }
