@@ -893,6 +893,11 @@ async function getUserSockets(username) {
     return redisClient.hVals(`user:${username}:sockets`);
 }
 
+// Returns { [deviceId]: socketId } for all currently connected devices of a user.
+async function getUserDeviceSockets(username) {
+    return redisClient.hGetAll(`user:${username}:sockets`);
+}
+
 async function pushToUserSocket(username, event, payload) {
     try {
         const sockets = await getUserSockets(username);
@@ -1556,13 +1561,31 @@ const io = new Server(server, {
 const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
 redisClient.connect().then(() => console.log('🌪️ Redis connected')).catch(err => console.error(err));
 
-// Shared by send_private_message/edit_message/delete_message_everyone — holds any
-// payload meant for a currently-offline user until they reconnect. Each payload carries
-// a `kind` so the flush loop in register_user knows which event to replay it as.
-async function queueForOfflineUser(username, payload) {
-    const queueKey = `queue:${username}`;
+// Holds a payload for one specific offline device until it reconnects.
+// Keyed by (username, deviceId) so each device drains only its own queue on reconnect,
+// preventing messages meant for device A from being consumed by device B.
+async function queueForOfflineDevice(username, deviceId, payload) {
+    const queueKey = `queue:${username}:${deviceId}`;
     await redisClient.rPush(queueKey, JSON.stringify(payload));
-    await redisClient.expire(queueKey, 60 * 60 * 24 * 30); // 30-day safety net for abandoned accounts
+    await redisClient.expire(queueKey, 60 * 60 * 24 * 30); // 30-day TTL
+}
+
+// Deliver an event to all of a user's currently-connected devices, and queue the same
+// payload for every registered device that is currently offline.  Returns true if at
+// least one live socket received the delivery.
+async function deliverOrQueueAll(username, event, payload) {
+    const deviceSockets = await getUserDeviceSockets(username);
+    for (const socketId of Object.values(deviceSockets)) {
+        io.to(socketId).emit(event, payload);
+    }
+    const allDeviceIds = Object.keys(await redisClient.hGetAll(`user:${username}:pubkeys`));
+    const onlineSet = new Set(Object.keys(deviceSockets));
+    for (const deviceId of allDeviceIds) {
+        if (!onlineSet.has(deviceId)) {
+            await queueForOfflineDevice(username, deviceId, payload);
+        }
+    }
+    return Object.keys(deviceSockets).length > 0;
 }
 
 /* NEARBY — anonymous, 24h-expiring matches between whoever's currently online.
@@ -2300,51 +2323,59 @@ io.on('connection', (socket) => {
             lastSeen: lastSeenVisible ? Date.now() : null
         });
 
-        // Flush anything that arrived while this user was offline — new messages, edits,
+        // Flush anything that arrived while this device was offline — new messages, edits,
         // and deletes all share this queue, replayed in order through the right event.
-        const queueKey = `queue:${data.username}`;
-        const queuedMessages = await redisClient.lRange(queueKey, 0, -1);
-        for (const raw of queuedMessages) {
-            const payload = JSON.parse(raw);
+        // Queue is keyed per-device so only this device's backlog is drained here.
+        const flushQueue = async (queueKey) => {
+            const queuedMessages = await redisClient.lRange(queueKey, 0, -1);
+            for (const raw of queuedMessages) {
+                const payload = JSON.parse(raw);
 
-            if (payload.kind === 'edit') {
-                socket.emit('message_edited', payload);
-            } else if (payload.kind === 'delete') {
-                socket.emit('message_deleted_everyone', payload);
-            } else if (payload.kind === 'reaction') {
-                socket.emit('message_reacted', payload);
-            } else if (payload.kind === 'status_delete') {
-                socket.emit('status_deleted', payload);
-            } else if (payload.kind === 'read_receipt') {
-                socket.emit('message_status_update', { id: payload.id, peer: payload.peer, status: payload.status });
-            } else if (payload.kind === 'group_message') {
-                socket.emit('receive_group_message', payload);
-            } else if (payload.kind === 'group_edit') {
-                socket.emit('group_message_edited', payload);
-            } else if (payload.kind === 'group_delete') {
-                socket.emit('group_message_deleted_everyone', payload);
-            } else if (payload.kind === 'group_reaction') {
-                socket.emit('group_message_reacted', payload);
-            } else if (payload.kind === 'group_read_receipt') {
-                socket.emit('group_message_status_update', { groupId: payload.groupId, id: payload.id, reader: payload.reader });
-            } else {
-                // Fan-out format: slice the reconnecting device's encrypted key from the stored map.
-                if (payload.deviceCiphertexts && typeof payload.deviceCiphertexts === 'object') {
-                    const encryptedKey = socket.deviceId ? (payload.deviceCiphertexts[socket.deviceId] || null) : null;
-                    const { deviceCiphertexts, ...rest } = payload;
-                    socket.emit('receive_private_message', { ...rest, encryptedKey });
+                if (payload.kind === 'edit') {
+                    socket.emit('message_edited', payload);
+                } else if (payload.kind === 'delete') {
+                    socket.emit('message_deleted_everyone', payload);
+                } else if (payload.kind === 'reaction') {
+                    socket.emit('message_reacted', payload);
+                } else if (payload.kind === 'status_delete') {
+                    socket.emit('status_deleted', payload);
+                } else if (payload.kind === 'read_receipt') {
+                    socket.emit('message_status_update', { id: payload.id, peer: payload.peer, status: payload.status });
+                } else if (payload.kind === 'group_message') {
+                    socket.emit('receive_group_message', payload);
+                } else if (payload.kind === 'group_edit') {
+                    socket.emit('group_message_edited', payload);
+                } else if (payload.kind === 'group_delete') {
+                    socket.emit('group_message_deleted_everyone', payload);
+                } else if (payload.kind === 'group_reaction') {
+                    socket.emit('group_message_reacted', payload);
+                } else if (payload.kind === 'group_read_receipt') {
+                    socket.emit('group_message_status_update', { groupId: payload.groupId, id: payload.id, reader: payload.reader });
                 } else {
-                    socket.emit('receive_private_message', payload);
-                }
-                for (const sid of await getUserSockets(payload.sender)) {
-                    io.to(sid).emit('message_status_update', { id: payload.id, peer: data.username, status: 'delivered' });
+                    // Fan-out format: slice this device's encrypted key from the stored map.
+                    if (payload.deviceCiphertexts && typeof payload.deviceCiphertexts === 'object') {
+                        const encryptedKey = socket.deviceId ? (payload.deviceCiphertexts[socket.deviceId] || null) : null;
+                        const { deviceCiphertexts, ...rest } = payload;
+                        socket.emit('receive_private_message', { ...rest, encryptedKey });
+                    } else {
+                        socket.emit('receive_private_message', payload);
+                    }
+                    for (const sid of await getUserSockets(payload.sender)) {
+                        io.to(sid).emit('message_status_update', { id: payload.id, peer: data.username, status: 'delivered' });
+                    }
                 }
             }
-        }
-        if (queuedMessages.length) {
-            await redisClient.del(queueKey);
-            console.log(`📤 Flushed ${queuedMessages.length} queued message(s) to ${data.username}`);
-        }
+            if (queuedMessages.length) {
+                await redisClient.del(queueKey);
+                console.log(`📤 Flushed ${queuedMessages.length} queued message(s) to ${data.username} (device: ${deviceId})`);
+            }
+        };
+
+        // Drain this device's own queue, then the legacy user-level queue (in-flight
+        // messages from before per-device keying was deployed; first device to reconnect
+        // consumes and deletes it so subsequent devices don't get stale duplicates).
+        await flushQueue(`queue:${data.username}:${deviceId}`);
+        await flushQueue(`queue:${data.username}`);
 
         console.log(`🔒 Registered user ${data.username} with public key.`);
     });
@@ -2441,51 +2472,68 @@ io.on('connection', (socket) => {
         };
 
         if (isFanOut) {
-            // Per-device relay: pick the encrypted key that matches each socket's deviceId.
-            const emitToSockets = async (sids) => {
-                for (const sid of sids) {
-                    const targetSocket = io.sockets.sockets.get(sid);
-                    const deviceId = targetSocket?.deviceId || null;
-                    const encryptedKey = deviceId ? (data.deviceCiphertexts[deviceId] || null) : null;
-                    io.to(sid).emit('receive_private_message', {
-                        ...basePayload,
-                        encryptedContent: data.encryptedContent,
-                        encryptedKey
-                    });
-                }
+            // Per-device fan-out: deliver the right encryptedKey to each live socket;
+            // queue the full deviceCiphertexts map for every offline device so the
+            // reconnecting device can slice its own key out at flush time.
+            const emitFanOutToDevice = (sid, deviceId) => {
+                const encryptedKey = deviceId ? (data.deviceCiphertexts[deviceId] || null) : null;
+                io.to(sid).emit('receive_private_message', {
+                    ...basePayload,
+                    encryptedContent: data.encryptedContent,
+                    encryptedKey
+                });
             };
 
-            const targetSockets = await getUserSockets(data.targetUsername);
-            if (targetSockets.length) {
-                await emitToSockets(targetSockets);
+            const targetDeviceSockets = await getUserDeviceSockets(data.targetUsername);
+            const targetAllDeviceIds = Object.keys(await redisClient.hGetAll(`user:${data.targetUsername}:pubkeys`));
+            const targetOnlineSet = new Set(Object.keys(targetDeviceSockets));
+            let anyDelivered = false;
+            for (const [dId, sid] of Object.entries(targetDeviceSockets)) {
+                emitFanOutToDevice(sid, dId);
+                anyDelivered = true;
+            }
+            for (const dId of targetAllDeviceIds) {
+                if (!targetOnlineSet.has(dId)) {
+                    await queueForOfflineDevice(data.targetUsername, dId, {
+                        ...basePayload,
+                        encryptedContent: data.encryptedContent,
+                        deviceCiphertexts: data.deviceCiphertexts
+                    });
+                }
+            }
+            if (anyDelivered) {
                 socket.emit('message_status_update', { id: data.id, peer: data.targetUsername, status: 'delivered' });
                 console.log(`📬 Fan-out message routed from ${socket.username} to ${data.targetUsername}`);
             } else {
-                // Store the full ciphertext map; reconnecting device slices its own key.
-                await queueForOfflineUser(data.targetUsername, {
-                    ...basePayload,
-                    encryptedContent: data.encryptedContent,
-                    deviceCiphertexts: data.deviceCiphertexts
-                });
-                console.log(`📥 ${data.targetUsername} is offline — fan-out message queued`);
+                console.log(`📥 ${data.targetUsername} is offline — fan-out message queued per device`);
             }
 
-            // Sync the message to sender's own other connected devices.
-            const senderSockets = await getUserSockets(socket.username);
-            const otherSenderSids = senderSockets.filter(sid => sid !== socket.id);
-            if (otherSenderSids.length) await emitToSockets(otherSenderSids);
+            // Sync message to sender's own other devices (live and offline).
+            const senderDeviceSockets = await getUserDeviceSockets(socket.username);
+            const senderAllDeviceIds = Object.keys(await redisClient.hGetAll(`user:${socket.username}:pubkeys`));
+            const senderOnlineSet = new Set(Object.keys(senderDeviceSockets));
+            for (const [dId, sid] of Object.entries(senderDeviceSockets)) {
+                if (sid !== socket.id) emitFanOutToDevice(sid, dId);
+            }
+            for (const dId of senderAllDeviceIds) {
+                if (!senderOnlineSet.has(dId)) {
+                    await queueForOfflineDevice(socket.username, dId, {
+                        ...basePayload,
+                        encryptedContent: data.encryptedContent,
+                        deviceCiphertexts: data.deviceCiphertexts
+                    });
+                }
+            }
 
         } else {
-            // Legacy path: relay the single encryptedMessage envelope as-is.
+            // Legacy path: relay the single encryptedMessage envelope to all devices.
             const payload = { ...basePayload, encryptedMessage: data.encryptedMessage };
-            const targetSockets = await getUserSockets(data.targetUsername);
-            if (targetSockets.length) {
-                for (const sid of targetSockets) io.to(sid).emit('receive_private_message', payload);
+            const anyDelivered = await deliverOrQueueAll(data.targetUsername, 'receive_private_message', payload);
+            if (anyDelivered) {
                 socket.emit('message_status_update', { id: data.id, peer: data.targetUsername, status: 'delivered' });
                 console.log(`📬 Message successfully routed from ${socket.username} to ${data.targetUsername}`);
             } else {
-                await queueForOfflineUser(data.targetUsername, payload);
-                console.log(`📥 ${data.targetUsername} is offline — message queued for delivery`);
+                console.log(`📥 ${data.targetUsername} is offline — message queued per device`);
             }
         }
 
@@ -2502,41 +2550,23 @@ io.on('connection', (socket) => {
     // Edit a previously-sent text message — same online/offline pattern as send_private_message
     socket.on('edit_message', async (data) => {
         if (!data.id || !data.targetUsername || !data.encryptedMessage) return;
-        const targetSockets = await getUserSockets(data.targetUsername);
         const payload = { kind: 'edit', id: data.id, sender: socket.username, encryptedMessage: data.encryptedMessage };
-
-        if (targetSockets.length) {
-            for (const sid of targetSockets) io.to(sid).emit('message_edited', payload);
-        } else {
-            await queueForOfflineUser(data.targetUsername, payload);
-        }
+        await deliverOrQueueAll(data.targetUsername, 'message_edited', payload);
     });
 
     // Delete a message for both participants — same online/offline pattern
     socket.on('delete_message_everyone', async (data) => {
         if (!data.id || !data.targetUsername) return;
-        const targetSockets = await getUserSockets(data.targetUsername);
         const payload = { kind: 'delete', id: data.id, sender: socket.username };
-
-        if (targetSockets.length) {
-            for (const sid of targetSockets) io.to(sid).emit('message_deleted_everyone', payload);
-        } else {
-            await queueForOfflineUser(data.targetUsername, payload);
-        }
+        await deliverOrQueueAll(data.targetUsername, 'message_deleted_everyone', payload);
     });
 
     // React to a message with an emoji (or clear a reaction with emoji: null) —
     // same online/offline pattern as edit_message
     socket.on('react_message', async (data) => {
         if (!data.id || !data.targetUsername) return;
-        const targetSockets = await getUserSockets(data.targetUsername);
         const payload = { kind: 'reaction', id: data.id, sender: socket.username, emoji: data.emoji || null };
-
-        if (targetSockets.length) {
-            for (const sid of targetSockets) io.to(sid).emit('message_reacted', payload);
-        } else {
-            await queueForOfflineUser(data.targetUsername, payload);
-        }
+        await deliverOrQueueAll(data.targetUsername, 'message_reacted', payload);
     });
 
     // Deleting your own Status removes it from every current friend's device too --
@@ -2553,12 +2583,7 @@ io.on('connection', (socket) => {
             const payload = { kind: 'status_delete', id: data.statusId, sender: socket.username };
             for (const row of friendRows.rows) {
                 const target = row.user_a === socket.username ? row.user_b : row.user_a;
-                const targetSockets = await getUserSockets(target);
-                if (targetSockets.length) {
-                    for (const sid of targetSockets) io.to(sid).emit('status_deleted', payload);
-                } else {
-                    await queueForOfflineUser(target, payload);
-                }
+                await deliverOrQueueAll(target, 'status_deleted', payload);
             }
         } catch (err) {
             console.error('delete_status failed:', err.message);
@@ -2593,12 +2618,7 @@ io.on('connection', (socket) => {
                 replyToText: (data.replyRecipients && data.replyRecipients[targetUsername]) || null,
                 replyToId: data.replyToId || null
             };
-            const targetSockets = await getUserSockets(targetUsername);
-            if (targetSockets.length) {
-                for (const sid of targetSockets) io.to(sid).emit('receive_group_message', payload);
-            } else {
-                await queueForOfflineUser(targetUsername, payload);
-            }
+            await deliverOrQueueAll(targetUsername, 'receive_group_message', payload);
         }
         logAnalyticsEvent('group_message_sent', socket.username);
         const gat = data.attachmentType;
@@ -2615,9 +2635,7 @@ io.on('connection', (socket) => {
         for (const [targetUsername, encryptedMessage] of Object.entries(data.recipients)) {
             if (targetUsername === socket.username) continue;
             const payload = { kind: 'group_edit', groupId: data.groupId, id: data.id, sender: socket.username, encryptedMessage };
-            const targetSockets = await getUserSockets(targetUsername);
-            if (targetSockets.length) for (const sid of targetSockets) io.to(sid).emit('group_message_edited', payload);
-            else await queueForOfflineUser(targetUsername, payload);
+            await deliverOrQueueAll(targetUsername, 'group_message_edited', payload);
         }
     });
 
@@ -2630,9 +2648,7 @@ io.on('connection', (socket) => {
         const payload = { kind: 'group_delete', groupId: data.groupId, id: data.id, sender: socket.username };
         for (const m of members) {
             if (m.username === socket.username) continue;
-            const targetSockets = await getUserSockets(m.username);
-            if (targetSockets.length) for (const sid of targetSockets) io.to(sid).emit('group_message_deleted_everyone', payload);
-            else await queueForOfflineUser(m.username, payload);
+            await deliverOrQueueAll(m.username, 'group_message_deleted_everyone', payload);
         }
     });
 
@@ -2645,9 +2661,7 @@ io.on('connection', (socket) => {
         const payload = { kind: 'group_reaction', groupId: data.groupId, id: data.id, sender: socket.username, emoji: data.emoji || null };
         for (const m of members) {
             if (m.username === socket.username) continue;
-            const targetSockets = await getUserSockets(m.username);
-            if (targetSockets.length) for (const sid of targetSockets) io.to(sid).emit('group_message_reacted', payload);
-            else await queueForOfflineUser(m.username, payload);
+            await deliverOrQueueAll(m.username, 'group_message_reacted', payload);
         }
     });
 
@@ -2661,13 +2675,8 @@ io.on('connection', (socket) => {
 
         for (const { id, sender } of data.reads) {
             if (!id || !sender || sender === socket.username) continue;
-            const payload = { groupId: data.groupId, id, reader: socket.username };
-            const senderSockets = await getUserSockets(sender);
-            if (senderSockets.length) {
-                for (const sid of senderSockets) io.to(sid).emit('group_message_status_update', payload);
-            } else {
-                await queueForOfflineUser(sender, { kind: 'group_read_receipt', ...payload });
-            }
+            const payload = { kind: 'group_read_receipt', groupId: data.groupId, id, reader: socket.username };
+            await deliverOrQueueAll(sender, 'group_message_status_update', payload);
         }
     });
 
@@ -2894,15 +2903,9 @@ io.on('connection', (socket) => {
     // reconnected. Queuing it means "already read" is durable, not a live-only signal.
     socket.on('mark_message_read', async (data) => {
         if (!data.peer || !Array.isArray(data.messageIds)) return;
-        const originalSenderSockets = await getUserSockets(data.peer);
-        if (originalSenderSockets.length) {
-            data.messageIds.forEach(id => {
-                for (const sid of originalSenderSockets) io.to(sid).emit('message_status_update', { id, peer: socket.username, status: 'read' });
-            });
-        } else {
-            for (const id of data.messageIds) {
-                await queueForOfflineUser(data.peer, { kind: 'read_receipt', id, peer: socket.username, status: 'read' });
-            }
+        for (const id of data.messageIds) {
+            await deliverOrQueueAll(data.peer, 'message_status_update',
+                { kind: 'read_receipt', id, peer: socket.username, status: 'read' });
         }
     });
 
