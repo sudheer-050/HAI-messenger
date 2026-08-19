@@ -2328,7 +2328,14 @@ io.on('connection', (socket) => {
             } else if (payload.kind === 'group_read_receipt') {
                 socket.emit('group_message_status_update', { groupId: payload.groupId, id: payload.id, reader: payload.reader });
             } else {
-                socket.emit('receive_private_message', payload);
+                // Fan-out format: slice the reconnecting device's encrypted key from the stored map.
+                if (payload.deviceCiphertexts && typeof payload.deviceCiphertexts === 'object') {
+                    const encryptedKey = socket.deviceId ? (payload.deviceCiphertexts[socket.deviceId] || null) : null;
+                    const { deviceCiphertexts, ...rest } = payload;
+                    socket.emit('receive_private_message', { ...rest, encryptedKey });
+                } else {
+                    socket.emit('receive_private_message', payload);
+                }
                 for (const sid of await getUserSockets(payload.sender)) {
                     io.to(sid).emit('message_status_update', { id: payload.id, peer: data.username, status: 'delivered' });
                 }
@@ -2343,8 +2350,8 @@ io.on('connection', (socket) => {
     });
 
     // Provide public keys AND current live status upon request!
-    // Returns the first available device key; the fan-out encryption sub-issue will
-    // evolve this to return all per-device keys once the frontend supports it.
+    // Returns the first registered device key for backward-compat with old clients.
+    // Use get_peer_devices to get all per-device keys for fan-out encryption.
     socket.on('get_user_public_key', async (username, callback) => {
         const pubKeys = await redisClient.hVals(`user:${username}:pubkeys`);
         const pubKey = pubKeys[0] || null;
@@ -2377,7 +2384,37 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Route a locked payload to a specific socket ID destination
+    // Returns all registered devices [{deviceId, publicKey}] for any user the caller
+    // is friends with (or for themselves). Used by the sender to build the per-device
+    // ciphertext map before calling send_private_message with the fan-out format.
+    socket.on('get_peer_devices', async (targetUsername, callback) => {
+        if (!socket.username || typeof callback !== 'function') return;
+        if (typeof targetUsername !== 'string' || !targetUsername) return callback({ devices: [] });
+        try {
+            // Self-lookup always allowed; cross-user lookup requires friendship.
+            if (targetUsername !== socket.username) {
+                const ok = await areFriends(socket.username, targetUsername);
+                if (!ok) return callback({ devices: [] });
+            }
+            const entries = await redisClient.hGetAll(`user:${targetUsername}:pubkeys`);
+            const devices = Object.entries(entries).map(([deviceId, publicKey]) => ({ deviceId, publicKey }));
+            callback({ devices });
+        } catch (err) {
+            console.error('get_peer_devices failed:', err.message);
+            callback({ devices: [] });
+        }
+    });
+
+    // Route a locked payload to a specific socket ID destination.
+    //
+    // Fan-out (multi-device) format — preferred:
+    //   data.encryptedContent   — AES-GCM ciphertext of the message body (base64)
+    //   data.deviceCiphertexts  — { [deviceId]: RSA-OAEP-encrypted AES key (base64) }
+    //                             includes entries for every recipient device AND the
+    //                             sender's own other devices (so they sync the message).
+    //
+    // Legacy single-device format — still accepted for backward compatibility:
+    //   data.encryptedMessage   — single RSA-OAEP+AES-GCM envelope (base64)
     socket.on('send_private_message', async (data) => {
         if (!data.targetUsername) return;
 
@@ -2390,13 +2427,12 @@ io.on('connection', (socket) => {
             return;
         }
 
-        const targetSockets = await getUserSockets(data.targetUsername);
+        const isFanOut = data.deviceCiphertexts && typeof data.deviceCiphertexts === 'object';
 
-        const payload = {
+        const basePayload = {
             kind: 'message',
             id: data.id,
             sender: socket.username,
-            encryptedMessage: data.encryptedMessage,
             replyToText: data.replyToText || null,
             replyToId: data.replyToId || null,
             forwarded: !!data.forwarded,
@@ -2404,16 +2440,55 @@ io.on('connection', (socket) => {
             status: !!data.status
         };
 
-        if (targetSockets.length) {
-            for (const sid of targetSockets) io.to(sid).emit('receive_private_message', payload);
-            // Recipient is connected right now, so the message is immediately "delivered"
-            socket.emit('message_status_update', { id: data.id, peer: data.targetUsername, status: 'delivered' });
-            console.log(`📬 Message successfully routed from ${socket.username} to ${data.targetUsername}`);
+        if (isFanOut) {
+            // Per-device relay: pick the encrypted key that matches each socket's deviceId.
+            const emitToSockets = async (sids) => {
+                for (const sid of sids) {
+                    const targetSocket = io.sockets.sockets.get(sid);
+                    const deviceId = targetSocket?.deviceId || null;
+                    const encryptedKey = deviceId ? (data.deviceCiphertexts[deviceId] || null) : null;
+                    io.to(sid).emit('receive_private_message', {
+                        ...basePayload,
+                        encryptedContent: data.encryptedContent,
+                        encryptedKey
+                    });
+                }
+            };
+
+            const targetSockets = await getUserSockets(data.targetUsername);
+            if (targetSockets.length) {
+                await emitToSockets(targetSockets);
+                socket.emit('message_status_update', { id: data.id, peer: data.targetUsername, status: 'delivered' });
+                console.log(`📬 Fan-out message routed from ${socket.username} to ${data.targetUsername}`);
+            } else {
+                // Store the full ciphertext map; reconnecting device slices its own key.
+                await queueForOfflineUser(data.targetUsername, {
+                    ...basePayload,
+                    encryptedContent: data.encryptedContent,
+                    deviceCiphertexts: data.deviceCiphertexts
+                });
+                console.log(`📥 ${data.targetUsername} is offline — fan-out message queued`);
+            }
+
+            // Sync the message to sender's own other connected devices.
+            const senderSockets = await getUserSockets(socket.username);
+            const otherSenderSids = senderSockets.filter(sid => sid !== socket.id);
+            if (otherSenderSids.length) await emitToSockets(otherSenderSids);
+
         } else {
-            // Recipient is offline — hold the still-encrypted message until they reconnect
-            await queueForOfflineUser(data.targetUsername, payload);
-            console.log(`📥 ${data.targetUsername} is offline — message queued for delivery`);
+            // Legacy path: relay the single encryptedMessage envelope as-is.
+            const payload = { ...basePayload, encryptedMessage: data.encryptedMessage };
+            const targetSockets = await getUserSockets(data.targetUsername);
+            if (targetSockets.length) {
+                for (const sid of targetSockets) io.to(sid).emit('receive_private_message', payload);
+                socket.emit('message_status_update', { id: data.id, peer: data.targetUsername, status: 'delivered' });
+                console.log(`📬 Message successfully routed from ${socket.username} to ${data.targetUsername}`);
+            } else {
+                await queueForOfflineUser(data.targetUsername, payload);
+                console.log(`📥 ${data.targetUsername} is offline — message queued for delivery`);
+            }
         }
+
         if (!data.status) {
             logAnalyticsEvent('message_sent', socket.username); // exclude Status broadcasts, which piggyback on this same relay
             // attachmentType is optional unencrypted metadata the client may send alongside the ciphertext
