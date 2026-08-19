@@ -2258,10 +2258,12 @@ io.on('connection', (socket) => {
 
         socket.username = decoded.username;
         data = { ...data, username: decoded.username };
-        // Register this device's socket and public key in per-user HASHes.
-        // Key is socket.id (proxy for device until a stable deviceId is introduced).
-        await redisClient.hSet(`user:${data.username}:sockets`, socket.id, socket.id);
-        if (data.publicKey) await redisClient.hSet(`user:${data.username}:pubkeys`, socket.id, data.publicKey);
+        // Use the stable per-browser deviceId the client generated (MYAG-80); fall
+        // back to socket.id for old clients that don't send one yet.
+        const deviceId = (typeof data.deviceId === 'string' && data.deviceId) ? data.deviceId : socket.id;
+        socket.deviceId = deviceId;
+        await redisClient.hSet(`user:${data.username}:sockets`, deviceId, socket.id);
+        if (data.publicKey) await redisClient.hSet(`user:${data.username}:pubkeys`, deviceId, data.publicKey);
 
         // Cache this user's last-seen privacy preference in Redis so the hot presence
         // paths below (and get_user_public_key/disconnect) never need a Postgres round trip.
@@ -2358,6 +2360,21 @@ io.on('connection', (socket) => {
 
         // Send a complete picture back to the requesting tab workspace
         callback(pubKey, { online, lastSeen });
+    });
+
+    // Returns the calling user's own registered devices: [{deviceId, publicKey}].
+    // Used by the frontend device-cache and fan-out encryption logic. Only the
+    // authenticated user may list their own devices — no cross-user lookup.
+    socket.on('get_device_list', async (callback) => {
+        if (!socket.username || typeof callback !== 'function') return;
+        try {
+            const entries = await redisClient.hGetAll(`user:${socket.username}:pubkeys`);
+            const devices = Object.entries(entries).map(([deviceId, publicKey]) => ({ deviceId, publicKey }));
+            callback({ devices });
+        } catch (err) {
+            console.error('get_device_list failed:', err.message);
+            callback({ devices: [] });
+        }
     });
 
     // Route a locked payload to a specific socket ID destination
@@ -2818,8 +2835,9 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => {
         if (socket.username) {
             // Remove only this device's entries; other devices stay connected.
-            await redisClient.hDel(`user:${socket.username}:sockets`, socket.id);
-            await redisClient.hDel(`user:${socket.username}:pubkeys`, socket.id);
+            const dId = socket.deviceId || socket.id;
+            await redisClient.hDel(`user:${socket.username}:sockets`, dId);
+            await redisClient.hDel(`user:${socket.username}:pubkeys`, dId);
 
             const remainingSockets = await redisClient.hLen(`user:${socket.username}:sockets`);
             if (remainingSockets === 0) {
