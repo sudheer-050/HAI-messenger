@@ -946,6 +946,13 @@
         .chat-area.no-active-chat .chat-header-actions {
             display: none;
         }
+        /* Status is home-screen-only: once a chat is open it's reachable via the
+           hamburger menu only (see .header-menu-dropdown), same as before MYAG-69.
+           :has() reflects DOM state declaratively so this never races the
+           login/logout JS that flips #statusFabWrap's own display directly. */
+        body:has(.chat-area:not(.no-active-chat)) #statusFabWrap {
+            display: none !important;
+        }
 
         .chat-header-actions { position: relative; margin-left: auto; }
         .chat-header-menu-btn {
@@ -1006,6 +1013,23 @@
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.2); }
         }
+        /* Docked presentation -- when a chat is open the button leaves its floating
+           corner slot and sits inline in .chat-header-actions beside #chatMoreMenuBtn,
+           sized to match that header control (36px) instead of the 52px floating FAB.
+           Higher specificity than the base rule (and the mobile floating override
+           below) so this alone governs layout once .docked is toggled by JS. */
+        .global-voice-btn.docked {
+            position: static;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: none;
+            box-shadow: none;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
+        .global-voice-btn.docked:hover { background: rgba(0, 0, 0, 0.08); color: var(--text-normal); transform: none; }
+        .global-voice-btn.docked .icon { width: 18px; height: 18px; }
 
         .ai-voice-status-banner {
             display: none;
@@ -8618,6 +8642,37 @@ void main(){
         const btn = document.getElementById('globalVoiceControlBtn');
         if (btn) btn.classList.toggle('listening', !!(globalVoiceControl && globalVoiceControl.shouldRestart));
     }
+
+    /* Single #globalVoiceControlBtn, two homes: floating near #statusFabWrap on the
+       home screen, docked into .chat-header-actions beside #chatMoreMenuBtn once a
+       chat is open -- same element and listeners moved between DOM slots, never
+       duplicated. Driven by a MutationObserver on #chatPanel's class list so every
+       existing "add/remove no-active-chat" call site (there are several, scattered
+       across open/close/delete-conversation/logout flows) picks this up for free,
+       with no per-site changes needed. Only moves the node + toggles the CSS class --
+       never touches .style.display, which stays owned by the login/logout code, so
+       this can't race it. */
+    function updateVoiceButtonDocking() {
+        const btn = document.getElementById('globalVoiceControlBtn');
+        const chatPanel = document.getElementById('chatPanel');
+        if (!btn || !chatPanel) return;
+        const isChatOpen = !chatPanel.classList.contains('no-active-chat');
+        const menuBtn = document.getElementById('chatMoreMenuBtn');
+        if (isChatOpen && menuBtn && menuBtn.parentNode) {
+            btn.classList.add('docked');
+            if (btn.nextSibling !== menuBtn) menuBtn.parentNode.insertBefore(btn, menuBtn);
+        } else {
+            btn.classList.remove('docked');
+            if (btn.parentNode !== document.body) document.body.appendChild(btn);
+        }
+    }
+    (function initVoiceButtonDockingObserver() {
+        const chatPanel = document.getElementById('chatPanel');
+        if (!chatPanel) return;
+        updateVoiceButtonDocking();
+        new MutationObserver(updateVoiceButtonDocking)
+            .observe(chatPanel, { attributes: true, attributeFilter: ['class'] });
+    })();
 
     function toggleGlobalVoiceControl() {
         if (globalVoiceControl && globalVoiceControl.shouldRestart) stopGlobalVoiceControl();
