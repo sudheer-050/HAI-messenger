@@ -69,6 +69,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  jobboard:
+    build: ./jobboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5002:5000"
+    environment:
+      - JOBS_FEED_URL=https://raw.githubusercontent.com/sudheer-050/HAI-messenger/master/jobs/feed.json
+      - FEED_CACHE_TTL=300
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -78,6 +87,7 @@ services:
     depends_on:
       - backend
       - ollama-proxy
+      - jobboard
 
 volumes:
   pgdata:
