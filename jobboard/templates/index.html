@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sudheer's Job Board</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e5e5e5;
+      padding: 1.25rem 2rem;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; color: #111; }
+    header p  { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
+
+    .container { max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+
+    .meta {
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 1.25rem;
+    }
+
+    .empty, .error {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      padding: 2.5rem;
+      text-align: center;
+      color: #666;
+    }
+    .error { border-color: #fca5a5; color: #b91c1c; background: #fff1f1; }
+
+    .job-card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      overflow: hidden;
+    }
+
+    .job-summary {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.5rem 1rem;
+      align-items: start;
+      padding: 1.25rem 1.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .job-summary:hover { background: #fafafa; }
+
+    .job-title { font-size: 1.05rem; font-weight: 600; color: #111; }
+    .job-company { font-size: 0.9rem; color: #555; margin-top: 0.15rem; }
+
+    .job-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.65rem;
+    }
+    .pill {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 99px;
+      background: #f0f0f0;
+      color: #444;
+    }
+    .pill.salary { background: #ecfdf5; color: #065f46; }
+
+    .ats-badge {
+      text-align: right;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .ats-score {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #166534;
+    }
+    .ats-label { font-size: 0.7rem; color: #888; }
+
+    .chevron {
+      display: inline-block;
+      margin-left: 0.5rem;
+      transition: transform 0.2s;
+      font-size: 0.8rem;
+      color: #999;
+    }
+    .job-card.open .chevron { transform: rotate(180deg); }
+
+    .job-detail {
+      display: none;
+      border-top: 1px solid #efefef;
+      padding: 1.5rem;
+    }
+    .job-card.open .job-detail { display: block; }
+
+    .section-heading {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 0.5rem;
+      margin-top: 1.5rem;
+    }
+    .section-heading:first-child { margin-top: 0; }
+
+    .description-text, .resume-text {
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f9f9f9;
+      border: 1px solid #ebebeb;
+      border-radius: 6px;
+      padding: 1rem;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .ats-breakdown {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .ats-stat {
+      background: #f9f9f9;
+      border: 1px solid #ebebeb;
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+    }
+    .ats-stat-label { font-size: 0.72rem; color: #888; }
+    .ats-stat-value { font-size: 1.2rem; font-weight: 700; color: #166534; margin-top: 0.1rem; }
+
+    .keyword-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.35rem;
+    }
+    .chip {
+      font-size: 0.75rem;
+      padding: 0.15rem 0.55rem;
+      border-radius: 4px;
+    }
+    .chip.found   { background: #dcfce7; color: #166534; }
+    .chip.missing { background: #fee2e2; color: #991b1b; }
+
+    .apply-btn {
+      display: inline-block;
+      margin-top: 1.5rem;
+      padding: 0.65rem 1.5rem;
+      background: #111;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: background 0.15s;
+    }
+    .apply-btn:hover { background: #333; }
+
+    @media (max-width: 540px) {
+      .job-summary { grid-template-columns: 1fr; }
+      .ats-badge { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Sudheer's Job Board</h1>
+  <p>Qualified openings (ATS &ge; 80%) — tailored resumes included. Apply via official company links only.</p>
+</header>
+
+<div class="container">
+
+  {% if error %}
+  <div class="error">
+    <strong>Could not load job feed.</strong><br>
+    {{ error | e }}
+  </div>
+  {% elif not feed.jobs %}
+  <div class="empty">
+    No qualified jobs yet. Check back soon.
+    {% if feed.generated_at %}
+    <div class="meta" style="margin-top:0.75rem">Feed last updated: {{ feed.generated_at }}</div>
+    {% endif %}
+  </div>
+  {% else %}
+
+  <div class="meta">
+    {{ feed.jobs | length }} qualified listing{% if feed.jobs | length != 1 %}s{% endif %}
+    {% if feed.generated_at %} &middot; feed updated {{ feed.generated_at }}{% endif %}
+  </div>
+
+  {% for job in feed.jobs %}
+  <div class="job-card" id="card-{{ loop.index }}">
+    <div class="job-summary" onclick="toggle({{ loop.index }})">
+      <div>
+        <div class="job-title">{{ job.title | e }} <span class="chevron">&#9660;</span></div>
+        <div class="job-company">{{ job.company | e }}</div>
+        <div class="job-pills">
+          <span class="pill salary">{{ job.salary | e }}</span>
+          <span class="pill">{{ job.location | e }}</span>
+          <span class="pill">{{ job.work_arrangement | e }}</span>
+          <span class="pill">{{ job.employment_type | e }}</span>
+        </div>
+      </div>
+      <div class="ats-badge">
+        <div class="ats-score">{{ job.ats_score }}%</div>
+        <div class="ats-label">ATS match</div>
+      </div>
+    </div>
+
+    <div class="job-detail">
+
+      <div class="section-heading">Job Description</div>
+      <div class="description-text">{{ job.description | e }}</div>
+
+      <div class="section-heading">ATS Breakdown</div>
+      <div class="ats-breakdown">
+        <div class="ats-stat">
+          <div class="ats-stat-label">Skills</div>
+          <div class="ats-stat-value">{{ job.ats_breakdown.skills_match }}%</div>
+        </div>
+        <div class="ats-stat">
+          <div class="ats-stat-label">Experience</div>
+          <div class="ats-stat-value">{{ job.ats_breakdown.experience_match }}%</div>
+        </div>
+        <div class="ats-stat">
+          <div class="ats-stat-label">Education</div>
+          <div class="ats-stat-value">{{ job.ats_breakdown.education_match }}%</div>
+        </div>
+      </div>
+
+      {% if job.ats_breakdown.notes %}
+      <p style="font-size:0.85rem;color:#555;margin-bottom:0.75rem;">{{ job.ats_breakdown.notes | e }}</p>
+      {% endif %}
+
+      {% if job.ats_breakdown.keywords_found %}
+      <div style="font-size:0.8rem;color:#555;margin-bottom:0.25rem;">Keywords matched:</div>
+      <div class="keyword-chips">
+        {% for kw in job.ats_breakdown.keywords_found %}
+        <span class="chip found">{{ kw | e }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if job.ats_breakdown.keywords_missing %}
+      <div style="font-size:0.8rem;color:#555;margin-top:0.5rem;margin-bottom:0.25rem;">Keywords missing:</div>
+      <div class="keyword-chips">
+        {% for kw in job.ats_breakdown.keywords_missing %}
+        <span class="chip missing">{{ kw | e }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="section-heading">Tailored Resume</div>
+      <div class="resume-text">{{ job.tailored_resume | e }}</div>
+
+      <a class="apply-btn"
+         href="{{ job.apply_url | e }}"
+         target="_blank"
+         rel="noopener noreferrer">
+        Apply on {{ job.company | e }}'s site &rarr;
+      </a>
+
+    </div>
+  </div>
+  {% endfor %}
+
+  {% endif %}
+</div>
+
+<script>
+function toggle(idx) {
+  const card = document.getElementById('card-' + idx);
+  card.classList.toggle('open');
+}
+</script>
+
+</body>
+</html>
