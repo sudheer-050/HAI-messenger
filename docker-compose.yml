@@ -50,6 +50,14 @@ services:
       # hostname resolve on Linux Docker hosts too.
       - OLLAMA_URL=http://host.docker.internal:11434
       - OLLAMA_CHAT_MODEL=llama3.2
+      # Mika bridge — admin-only. All six vars must be set in .env for the
+      # /api/admin/mika/message endpoint to be active (503 otherwise).
+      - MULTICA_API_TOKEN=${MULTICA_API_TOKEN}
+      - MULTICA_SERVER_URL=${MULTICA_SERVER_URL:-https://api.multica.ai}
+      - MULTICA_WORKSPACE_ID=${MULTICA_WORKSPACE_ID}
+      - MULTICA_PROJECT_ID=${MULTICA_PROJECT_ID}
+      - MIKA_AGENT_ID=${MIKA_AGENT_ID}
+      - MIKA_PARENT_ISSUE_ID=${MIKA_PARENT_ISSUE_ID}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
