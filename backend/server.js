@@ -75,6 +75,17 @@ app.use(express.static(path.join(__dirname, 'public'), {
         if (filePath.endsWith('index.html') || filePath.endsWith('landing.html')) {
             res.setHeader('Cache-Control', 'no-store, must-revalidate');
         }
+        // Voice model: large file, content-addressed filename — cache aggressively.
+        // The service worker passes every fetch through with no-store, so this header
+        // only helps if the SW is bypassed (direct loads, non-PWA browsers).
+        if (filePath.includes('/voice-model/') && filePath.endsWith('.tar.gz')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+        // vosk.js contains the Vosk WASM binary (Apache-2.0). The browser compiles
+        // WebAssembly at runtime. If a Content-Security-Policy header is ever added
+        // to this app, include 'wasm-unsafe-eval' in script-src to allow WASM JIT
+        // compilation (required by Chrome 95+, Firefox, Safari 16.4+). Without any
+        // CSP the browser permits WASM compilation by default — no change needed now.
     }
 }));
 

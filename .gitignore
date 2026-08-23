@@ -5,3 +5,8 @@ node_modules/
 Thumbs.db
 cloudflared/*.json
 cloudflared/cert.pem
+
+# Voice model — downloaded at deploy time via backend/scripts/download-voice-model.sh
+# (40 MB tar.gz; not suitable for git)
+frontend/voice-model/*.tar.gz
+frontend/voice-model/*.zip
