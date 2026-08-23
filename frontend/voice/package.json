@@ -1,0 +1,9 @@
+{
+  "name": "hai-voice-parser",
+  "private": true,
+  "type": "module",
+  "description": "Standalone deterministic voice-command registry/parser. No runtime dependencies.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
