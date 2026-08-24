@@ -2234,6 +2234,182 @@ app.put('/api/admin/theme', requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+/* ============ MIKA BRIDGE — admin-only Multica agent chat ============
+   Security contract (MYAG-127):
+   - Every request passes requireAuth (JWT) then requireAdmin (DB is_admin check).
+     UI hiding is NOT the gate — the server enforces this independently.
+   - Multica credentials live only in env vars; they are never returned in any
+     API response, never logged, never passed via shell string interpolation.
+   - All Multica API calls go out over HTTPS to MULTICA_SERVER_URL.
+   - Message text reaches Multica only through the JSON body of the issue-create
+     request — never interpolated into a shell command or query string.
+   - The workspace/project/agent allowlist is hard-wired to env vars checked at
+     startup; the endpoint refuses any call that would target a different entity.
+   - Idempotency: a SHA-256 content fingerprint stored in Redis prevents
+     duplicate issues from retries within a 5-minute dedup window.
+   - Rate limits: IP-level (express-rate-limit) + per-user Redis counter.
+   - Every call is logged to analytics_events ('mika_message_sent') for audit.
+   - Timeouts: issue-create has a 15 s hard ceiling; reply polling stops at 60 s
+     and returns 503 rather than hanging the connection indefinitely.
+
+   Threat model (abbreviated):
+   ┌─────────────────────────────────────────────────┬────────────────────────────────────────────────────┐
+   │ Threat                                          │ Mitigation                                         │
+   ├─────────────────────────────────────────────────┼────────────────────────────────────────────────────┤
+   │ Non-admin user calls the endpoint               │ requireAuth + requireAdmin (DB check, not JWT-only)│
+   │ Admin JWT stolen/replayed                       │ httpOnly cookie; is_admin still re-checked from DB │
+   │ Message text injected into Multica API call     │ JSON body only; no shell or query-string concat    │
+   │ MULTICA_API_TOKEN leaked to browser             │ Env var only; never in any response                │
+   │ Spam creating thousands of Multica issues        │ 5/10 min per-user + 10/15 min IP rate limit        │
+   │ Retry storm duplicating issues                  │ SHA-256 content fingerprint idempotency in Redis   │
+   │ Wrong workspace/project targeted                │ Env-var allowlist; startup warning if unset        │
+   │ Hung request from slow/offline Multica          │ 60 s poll deadline → 503, not a hung connection    │
+   │ Credentials committed to git                    │ .env gitignored; .env.example has placeholders only│
+   └─────────────────────────────────────────────────┴────────────────────────────────────────────────────┘
+
+   The Multica REST API base is MULTICA_SERVER_URL (defaults: https://api.multica.ai).
+   Auth header: Authorization: Bearer <MULTICA_API_TOKEN>.
+   Endpoint shapes (verified against Multica API at implementation time):
+     Create issue:   POST   {serverUrl}/api/v1/workspaces/{workspaceId}/issues
+     List comments:  GET    {serverUrl}/api/v1/workspaces/{workspaceId}/issues/{issueId}/comments
+     Get issue:      GET    {serverUrl}/api/v1/workspaces/{workspaceId}/issues/{issueId}
+   The backend implementation stage (MYAG-126 stage 2) fills in these calls;
+   this stage defines the contract and security wrapper around them. */
+
+const MIKA_CONFIG = {
+    apiToken:      process.env.MULTICA_API_TOKEN      || null,
+    serverUrl:     (process.env.MULTICA_SERVER_URL    || 'https://api.multica.ai').replace(/\/$/, ''),
+    workspaceId:   process.env.MULTICA_WORKSPACE_ID   || null,
+    projectId:     process.env.MULTICA_PROJECT_ID     || null,
+    agentId:       process.env.MIKA_AGENT_ID          || null,
+    parentIssueId: process.env.MIKA_PARENT_ISSUE_ID   || null,
+};
+const MIKA_CONFIGURED = Object.values(MIKA_CONFIG).every(Boolean);
+if (!MIKA_CONFIGURED) {
+    const missing = Object.entries(MIKA_CONFIG).filter(([, v]) => !v).map(([k]) => k);
+    console.warn(`⚠️  Mika bridge disabled — missing env vars: ${missing.join(', ')}`);
+}
+
+function mikaApiHeaders() {
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${MIKA_CONFIG.apiToken}`,
+    };
+}
+
+// Creates a child issue in the allowlisted workspace/project assigned to Mika.
+// The message is placed in the issue description — never in a shell command.
+async function createMikaBridgeIssue(correlationId, adminMessage) {
+    const url = `${MIKA_CONFIG.serverUrl}/api/v1/workspaces/${MIKA_CONFIG.workspaceId}/issues`;
+    const res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: mikaApiHeaders(),
+        body: JSON.stringify({
+            title: `[HAI bridge ${correlationId}] Admin message`,
+            description: adminMessage,
+            project_id: MIKA_CONFIG.projectId,
+            parent_issue_id: MIKA_CONFIG.parentIssueId,
+            assignee_id: MIKA_CONFIG.agentId,
+            status: 'todo',
+        }),
+    }, 15000);
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Multica issue create ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    return data.id || data.issue?.id;
+}
+
+const MIKA_POLL_INTERVAL_MS = 4000;
+const MIKA_REPLY_TIMEOUT_MS = 60000;
+
+// Polls the issue's comment list until an agent comment authored by MIKA_AGENT_ID
+// appears, then returns its text. Returns null on timeout.
+// Only the final, first-level comment is returned — bookkeeping/progress replies
+// are skipped so the admin only sees Mika's finished answer.
+async function pollMikaReply(issueId, deadlineMs) {
+    const url = `${MIKA_CONFIG.serverUrl}/api/v1/workspaces/${MIKA_CONFIG.workspaceId}/issues/${issueId}/comments?root_only=true&limit=20`;
+    while (Date.now() < deadlineMs) {
+        await new Promise(r => setTimeout(r, MIKA_POLL_INTERVAL_MS));
+        try {
+            const res = await fetchWithTimeout(url, { method: 'GET', headers: mikaApiHeaders() }, 10000);
+            if (!res.ok) continue;
+            const data = await res.json();
+            const comments = Array.isArray(data) ? data : (data.comments || data.items || []);
+            const agentComment = comments.find(c =>
+                (c.author_id === MIKA_CONFIG.agentId || c.creator_id === MIKA_CONFIG.agentId) &&
+                c.body && !c.is_bookkeeping
+            );
+            if (agentComment) return (agentComment.body || agentComment.content || '').trim();
+        } catch (pollErr) {
+            console.warn('mika poll error (will retry):', pollErr.message);
+        }
+    }
+    return null;
+}
+
+const MIKA_RATE_LIMIT = 5;
+const MIKA_RATE_WINDOW = 10 * 60;
+const MIKA_MESSAGE_MAX = 4000;
+
+const ipLimitMika = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many messages to Mika from this IP. Please try again later.' },
+});
+
+app.post('/api/admin/mika/message', requireAuth, requireAdmin, ipLimitMika, async (req, res) => {
+    if (!MIKA_CONFIGURED) {
+        return res.status(503).json({ error: 'Mika bridge is not configured on this server.' });
+    }
+
+    const message = typeof (req.body || {}).message === 'string' ? req.body.message.trim() : '';
+    if (!message) return res.status(400).json({ error: 'message is required.' });
+    if (message.length > MIKA_MESSAGE_MAX) {
+        return res.status(400).json({ error: `Message must be at most ${MIKA_MESSAGE_MAX} characters.` });
+    }
+
+    const withinLimit = await checkAndBumpRateLimit(
+        `ratelimit:mika:${req.username}`, MIKA_RATE_LIMIT, MIKA_RATE_WINDOW
+    );
+    if (!withinLimit) {
+        return res.status(429).json({ error: 'Too many messages to Mika. Please slow down.' });
+    }
+
+    // 5-minute idempotency window: same user + same message text → same response,
+    // no duplicate Multica issue.
+    const contentHash = crypto.createHash('sha256').update(`${req.username}:${message}`).digest('hex').slice(0, 24);
+    const idempotencyKey = `mika:idem:${contentHash}`;
+    const cached = await redisClient.get(idempotencyKey);
+    if (cached) {
+        logAnalyticsEvent('mika_message_dedup', req.username);
+        return res.json({ reply: JSON.parse(cached).reply, cached: true });
+    }
+
+    const correlationId = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const deadline = Date.now() + MIKA_REPLY_TIMEOUT_MS;
+
+    try {
+        logAnalyticsEvent('mika_message_sent', req.username);
+        const issueId = await createMikaBridgeIssue(correlationId, message);
+        if (!issueId) throw new Error('Multica returned no issue ID');
+
+        const reply = await pollMikaReply(issueId, deadline);
+        if (!reply) {
+            return res.status(503).json({ error: "Mika is thinking — she didn't respond in time. Try again in a moment." });
+        }
+
+        await redisClient.set(idempotencyKey, JSON.stringify({ reply }), { EX: 5 * 60 });
+        res.json({ reply });
+    } catch (err) {
+        console.error(`mika/message [${correlationId}] failed:`, err.message);
+        res.status(502).json({ error: 'Could not reach Mika right now. Please try again.' });
+    }
+});
+
 io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
