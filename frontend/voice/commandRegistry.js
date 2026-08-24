@@ -68,13 +68,25 @@ export const SETTINGS_ALLOWLIST = Object.freeze({
   'color theme': 'theme',
   'font size': 'fontSize',
   'text size': 'fontSize',
-  wallpaper: 'wallpaper',
-  'chat wallpaper': 'wallpaper',
-  'chat background': 'wallpaper',
-  language: 'language',
   'notification sound': 'notificationSound',
   notifications: 'notifications',
   'read receipts': 'readReceipts',
+});
+
+// Canonical setting key -> values that its bridge handler can execute. Keeping
+// this beside the alias allowlist makes parser acceptance and execution a
+// single, auditable contract. Values not listed here fail before confirmation.
+const BOOLEAN_SETTING_VALUES = Object.freeze([
+  'on', 'enabled', 'enable', 'yes',
+  'off', 'disabled', 'disable', 'no',
+]);
+
+export const SETTING_VALUES = Object.freeze({
+  theme: Object.freeze(['dark']),
+  fontSize: Object.freeze(['small', 'medium', 'large']),
+  notificationSound: BOOLEAN_SETTING_VALUES,
+  notifications: BOOLEAN_SETTING_VALUES,
+  readReceipts: BOOLEAN_SETTING_VALUES,
 });
 
 // Phrases that must always fail closed with reason 'blocked', regardless of

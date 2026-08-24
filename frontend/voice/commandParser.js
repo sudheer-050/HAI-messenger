@@ -8,13 +8,13 @@
  *
  * Result shape:
  *   success: { ok: true, command: <id>, args: { ... } }
- *   failure: { ok: false, reason: 'unknown'|'ambiguous'|'incomplete'|'malformed'|'blocked', detail }
+ *   failure: { ok: false, reason: 'unknown'|'ambiguous'|'incomplete'|'malformed'|'blocked'|'invalid_value', detail }
  *
  * Any input that isn't an unambiguous, complete, allowed match fails closed
  * (ok: false) and produces no args for a caller to act on.
  */
 
-import { COMMANDS, SETTINGS_ALLOWLIST, BLOCKED_PATTERNS } from './commandRegistry.js';
+import { COMMANDS, SETTINGS_ALLOWLIST, SETTING_VALUES, BLOCKED_PATTERNS } from './commandRegistry.js';
 
 function validateRegistry(commands) {
   const owner = new Map();
@@ -120,6 +120,11 @@ function parseSetting(remainder) {
 
   const settingKey = SETTINGS_ALLOWLIST[rawSetting];
   if (!settingKey) return fail('unknown', `setting "${rawSetting}" is not recognized`);
+
+  const validValues = SETTING_VALUES[settingKey];
+  if (!validValues || !validValues.includes(value)) {
+    return fail('invalid_value', `value "${value}" is not valid for setting "${rawSetting}"`);
+  }
 
   return ok('change_setting', { setting: settingKey, value });
 }

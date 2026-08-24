@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveContact } from './voice-controller.js';
+import { createVoiceController, resolveContact } from './voice-controller.js';
+import { SETTINGS_ALLOWLIST, SETTING_VALUES } from './commandRegistry.js';
 
 test('resolution requires one exact username or label', () => {
   const contacts = [{ username: 'sam', label: 'Sam' }, { username: 'alex1', label: 'Alex' }];
@@ -78,4 +79,87 @@ test('dismissing forward confirmation has zero forwarding side effects', async (
   result.elements.dismiss.dispatch('click');
   assert.equal(result.controller.state, 'idle');
   assert.deepEqual(result.calls, []);
+});
+
+class FakeElement {
+  constructor() {
+    this.hidden = true;
+    this.dataset = {};
+    this.textContent = '';
+    this.listeners = {};
+  }
+  addEventListener(type, listener) { this.listeners[type] = listener; }
+  setAttribute() {}
+  click() { return this.listeners.click?.(); }
+}
+
+function elements() {
+  return Object.fromEntries(
+    ['panel', 'mic', 'status', 'confirm', 'summary', 'approve', 'dismiss', 'cancel']
+      .map(key => [key, new FakeElement()])
+  );
+}
+
+test('allowlisted setting aliases reach confirmation and execute their exact key/value', async () => {
+  globalThis.document = { hidden: false, addEventListener() {} };
+  globalThis.window = { addEventListener() {} };
+
+  for (const [alias, key] of Object.entries(SETTINGS_ALLOWLIST)) {
+    for (const value of SETTING_VALUES[key]) {
+      const calls = [];
+      class Adapter {
+        ready = true;
+        listening = false;
+        addEventListener(type, listener) { if (type === 'transcript') this.transcript = listener; }
+        async start() {
+          this.listening = true;
+          this.transcript({ detail: { text: `change setting ${alias} to ${value}` } });
+        }
+        stop() { this.listening = false; }
+      }
+      const ui = elements();
+      const bridge = {
+        getContacts: () => [], getActiveChat: () => null,
+        describe: () => 'confirm setting',
+        changeSetting: (...args) => calls.push(args),
+      };
+      const controller = createVoiceController({ bridge, elements: ui, Adapter });
+      await controller.start();
+      assert.equal(controller.state, 'confirming', `${alias}=${value} did not confirm`);
+      ui.approve.click();
+      assert.deepEqual(calls, [[key, value]], `${alias}=${value} did not execute`);
+    }
+  }
+});
+
+test('invalid setting values never reach confirmation or execution', async () => {
+  globalThis.document = { hidden: false, addEventListener() {} };
+  globalThis.window = { addEventListener() {} };
+
+  for (const alias of Object.keys(SETTINGS_ALLOWLIST)) {
+    const calls = [];
+    class Adapter {
+      ready = true;
+      listening = false;
+      addEventListener(type, listener) { if (type === 'transcript') this.transcript = listener; }
+      async start() {
+        this.listening = true;
+        this.transcript({ detail: { text: `change setting ${alias} to definitely-invalid` } });
+      }
+      stop() { this.listening = false; }
+    }
+    const ui = elements();
+    const controller = createVoiceController({
+      Adapter, elements: ui,
+      bridge: {
+        getContacts: () => [], getActiveChat: () => null,
+        describe: () => 'should not describe',
+        changeSetting: (...args) => calls.push(args),
+      },
+    });
+    await controller.start();
+    assert.equal(controller.state, 'error', alias);
+    assert.equal(ui.confirm.hidden, true, alias);
+    assert.deepEqual(calls, [], alias);
+  }
 });

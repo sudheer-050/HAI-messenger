@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseVoiceCommand, validateRegistry } from './commandParser.js';
-import { COMMANDS } from './commandRegistry.js';
+import { COMMANDS, SETTINGS_ALLOWLIST, SETTING_VALUES } from './commandRegistry.js';
 
 // ---- canonical phrases -----------------------------------------------
 
@@ -91,9 +91,39 @@ test('search: synonym "look for"', () => {
 });
 
 test('change_setting: synonym alias "dark mode" maps to theme', () => {
-  const r = parseVoiceCommand('set dark mode to on');
+  const r = parseVoiceCommand('set dark mode to dark');
   assert.equal(r.ok, true);
-  assert.deepEqual(r.args, { setting: 'theme', value: 'on' });
+  assert.deepEqual(r.args, { setting: 'theme', value: 'dark' });
+});
+
+test('every allowlisted setting alias accepts exactly its bridge value contract', () => {
+  for (const [alias, key] of Object.entries(SETTINGS_ALLOWLIST)) {
+    assert.ok(SETTING_VALUES[key]?.length, `${alias} maps to a key without executable values`);
+    for (const value of SETTING_VALUES[key]) {
+      const result = parseVoiceCommand(`change setting ${alias} to ${value}`);
+      assert.deepEqual(result, {
+        ok: true,
+        command: 'change_setting',
+        args: { setting: key, value },
+      }, `${alias}=${value}`);
+    }
+  }
+});
+
+test('every allowlisted setting alias rejects unsupported values before confirmation', () => {
+  for (const alias of Object.keys(SETTINGS_ALLOWLIST)) {
+    const result = parseVoiceCommand(`change setting ${alias} to definitely-invalid`);
+    assert.equal(result.ok, false, alias);
+    assert.equal(result.reason, 'invalid_value', alias);
+  }
+});
+
+test('settings without bridge handlers are not voice-allowlisted', () => {
+  for (const alias of ['wallpaper', 'chat wallpaper', 'chat background', 'language']) {
+    const result = parseVoiceCommand(`change setting ${alias} to example`);
+    assert.equal(result.ok, false, alias);
+    assert.equal(result.reason, 'unknown', alias);
+  }
 });
 
 // ---- overlaps / longest-match determinism --------------------------------
