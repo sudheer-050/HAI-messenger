@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Mika — HAI Messenger</title>
+    <meta name="description" content="Admin-only conversation with Mika, the Multica agent behind HAI Messenger.">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" href="/icons/favicon-32.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+        :root {
+            --bg-main: #09090b;
+            --bg-sidebar: #18181b;
+            --accent-brand: #9B8AFB;
+            --accent-brand-hover: #8171E8;
+            --text-normal: #fafafa;
+            --text-muted: #a1a1aa;
+            --border-color: #27272a;
+            --font-stack: 'Inter', system-ui, -apple-system, sans-serif;
+            --glass-weak: rgba(255, 255, 255, 0.06);
+            --glass-border: rgba(255, 255, 255, 0.12);
+            --danger: #f28b8e;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; }
+        body {
+            font-family: var(--font-stack);
+            background: var(--bg-main);
+            color: var(--text-normal);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .back-link {
+            display: flex; align-items: center; justify-content: center;
+            width: 36px; height: 36px; border-radius: 50%;
+            color: var(--text-muted); text-decoration: none; flex-shrink: 0;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .back-link:hover { background: var(--glass-weak); color: var(--text-normal); }
+        .header-avatar {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-brand), #6f5be0);
+            display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 14px; flex-shrink: 0;
+        }
+        header .name { font-weight: 700; font-size: 15px; }
+        header .sub { font-size: 11.5px; color: var(--text-muted); }
+
+        .info-banner {
+            display: flex; align-items: flex-start; gap: 8px;
+            margin: 10px 16px 0; padding: 10px 12px;
+            background: rgba(155, 138, 251, 0.08);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            font-size: 12px; line-height: 1.45; color: var(--text-muted);
+            flex-shrink: 0;
+        }
+        .info-banner svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; color: var(--accent-brand); }
+
+        main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        #mikaMessages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; max-width: 720px; width: 100%; margin: 0 auto; }
+        #mikaEmpty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 32px 0; }
+
+        .msg-block { display: flex; flex-direction: column; gap: 4px; align-self: flex-end; max-width: 78%; }
+        .msg-block.assistant { align-self: flex-start; }
+        .msg { padding: 10px 15px; border-radius: 16px; font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+        .msg-block:not(.assistant) .msg { background: var(--accent-brand); color: #fff; border-bottom-right-radius: 4px; }
+        .msg-block.assistant .msg { background: var(--glass-weak); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
+        .msg.error-msg { background: rgba(218, 55, 60, 0.15); color: var(--danger); border-bottom-left-radius: 4px; }
+
+        .msg-status-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+        .msg-status-row.self { align-self: flex-end; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+        .status-dot.pending { background: #d9a441; animation: pulse 1.4s ease-in-out infinite; }
+        .status-dot.failed { background: var(--danger); }
+        @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+        .retry-btn {
+            border: 1px solid var(--glass-border); background: transparent; color: var(--accent-brand);
+            font-family: var(--font-stack); font-size: 11px; font-weight: 600; cursor: pointer;
+            border-radius: 999px; padding: 3px 10px; margin-left: 4px;
+        }
+        .retry-btn:hover { background: var(--glass-weak); }
+
+        .typing-indicator { align-self: flex-start; display: flex; gap: 4px; padding: 12px 15px; background: var(--glass-weak); border: 1px solid var(--glass-border); border-radius: 16px; border-bottom-left-radius: 4px; }
+        .typing-indicator span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.2s ease-in-out infinite; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+        .input-row { display: flex; align-items: flex-end; gap: 10px; padding: 12px 20px 20px; max-width: 720px; width: 100%; margin: 0 auto; flex-shrink: 0; }
+        #mikaInput {
+            flex: 1; resize: none; max-height: 140px; min-height: 44px;
+            padding: 12px 16px; border-radius: 16px; border: 1px solid var(--border-color);
+            background: var(--glass-weak); color: var(--text-normal);
+            font-family: var(--font-stack); font-size: 14.5px; line-height: 1.4; outline: none;
+        }
+        #mikaInput:focus { border-color: var(--accent-brand); }
+        #mikaSendBtn {
+            width: 44px; height: 44px; border-radius: 50%; border: none; flex-shrink: 0;
+            background: var(--accent-brand); color: #fff; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #mikaSendBtn:hover { background: var(--accent-brand-hover); }
+        #mikaSendBtn:disabled { opacity: 0.5; cursor: default; }
+        #mikaSendBtn svg { width: 17px; height: 17px; }
+
+        #mikaGate {
+            display: none; flex: 1; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 40px; text-align: center;
+        }
+        #mikaGate svg { width: 34px; height: 34px; color: var(--text-muted); }
+        #mikaGate p { color: var(--text-muted); font-size: 13.5px; max-width: 320px; }
+        #mikaApp { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/index.html" class="back-link" aria-label="Back to chats" title="Back to chats">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </a>
+        <div class="header-avatar">M</div>
+        <div>
+            <div class="name">Mika</div>
+            <div class="sub">Multica agent · admin only</div>
+        </div>
+    </header>
+
+    <div id="mikaApp">
+        <div class="info-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span>Each message you send here starts a separate, auditable Multica issue/run assigned to Mika — it's not a live chat. Replies can take a little while and arrive automatically.</span>
+        </div>
+
+        <main>
+            <div id="mikaMessages"><div id="mikaEmpty">No messages yet. Say hello to Mika.</div></div>
+            <div class="input-row">
+                <textarea id="mikaInput" placeholder="Message Mika…" rows="1"></textarea>
+                <button id="mikaSendBtn" aria-label="Send">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <div id="mikaGate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3z"/></svg>
+        <p id="mikaGateText">Checking access…</p>
+    </div>
+
+    <script>
+        /* Admin-only gate. Server-side authorization on /api/admin/mika/* is the
+           real source of truth (requireAuth + DB-backed requireAdmin) -- this check
+           only decides whether to render the UI at all, so a non-admin never even
+           sees the conversation shell, let alone real data. */
+        const mikaApp = document.getElementById('mikaApp');
+        const mikaGate = document.getElementById('mikaGate');
+        const mikaGateText = document.getElementById('mikaGateText');
+
+        function showGate(text) {
+            mikaApp.style.display = 'none';
+            mikaGate.style.display = 'flex';
+            mikaGateText.textContent = text;
+        }
+
+        async function authFetchJSON(url, method, body) {
+            const response = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) { const err = new Error(data.error || 'Something went wrong. Please try again.'); err.status = response.status; throw err; }
+            return data;
+        }
+
+        function getOrCreateDeviceId() {
+            let id = localStorage.getItem('hai_device_id');
+            if (!id) {
+                id = crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                        const r = Math.random() * 16 | 0;
+                        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                    });
+                localStorage.setItem('hai_device_id', id);
+            }
+            return id;
+        }
+
+        /* ============ MESSAGE RENDERING ============ */
+        const mikaMessages = document.getElementById('mikaMessages');
+        const mikaEmpty = document.getElementById('mikaEmpty');
+        const pendingByRequestId = new Map(); // requestId -> { block, statusRow, message }
+
+        function clearEmpty() { if (mikaEmpty.parentNode) mikaEmpty.remove(); }
+        function scrollToBottom() { mikaMessages.scrollTop = mikaMessages.scrollHeight; }
+
+        function appendUserBubble(text) {
+            clearEmpty();
+            const block = document.createElement('div');
+            block.className = 'msg-block';
+            block.innerHTML = `<div class="msg">${escapeHtml(text)}</div>`;
+            mikaMessages.appendChild(block);
+            scrollToBottom();
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // One status row per outgoing request, showing pending / delivered / failed
+        // with a retry action -- these are the delivery states the ticket asks for
+        // (pending, delivered, failed, retry), rendered under the user's own bubble.
+        function appendPendingStatus(requestId, message) {
+            clearEmpty();
+            const statusRow = document.createElement('div');
+            statusRow.className = 'msg-status-row self';
+            statusRow.innerHTML = `<span class="status-dot pending"></span><span class="status-text">Sent to Mika — waiting for a reply…</span>`;
+            mikaMessages.appendChild(statusRow);
+            scrollToBottom();
+            pendingByRequestId.set(requestId, { statusRow, message });
+        }
+
+        function appendAssistantBubble(text) {
+            clearEmpty();
+            const block = document.createElement('div');
+            block.className = 'msg-block assistant';
+            block.innerHTML = `<div class="msg">${escapeHtml(text)}</div>`;
+            mikaMessages.appendChild(block);
+            scrollToBottom();
+        }
+
+        function markStatusFailed(requestId, errorText, message) {
+            const entry = pendingByRequestId.get(requestId);
+            if (!entry) return;
+            entry.statusRow.innerHTML = `<span class="status-dot failed"></span><span class="status-text">${escapeHtml(errorText)}</span><button type="button" class="retry-btn" data-retry>Retry</button>`;
+            entry.statusRow.querySelector('[data-retry]').addEventListener('click', () => sendMikaMessage(message));
+            pendingByRequestId.delete(requestId);
+        }
+
+        function markStatusCompleted(requestId, reply) {
+            const entry = pendingByRequestId.get(requestId);
+            if (entry) entry.statusRow.remove();
+            pendingByRequestId.delete(requestId);
+            appendAssistantBubble(reply);
+        }
+
+        function renderHistoryEntry(req) {
+            appendUserBubble(req.message);
+            if (req.status === 'completed' && req.reply) {
+                appendAssistantBubble(req.reply);
+            } else if (req.status === 'pending') {
+                appendPendingStatus(req.requestId, req.message);
+            } else if (req.status === 'timeout' || req.status === 'failed') {
+                clearEmpty();
+                const statusRow = document.createElement('div');
+                statusRow.className = 'msg-status-row self';
+                const label = req.status === 'timeout' ? "Mika didn't respond in time." : 'Could not reach Mika.';
+                statusRow.innerHTML = `<span class="status-dot failed"></span><span class="status-text">${escapeHtml(label)}</span><button type="button" class="retry-btn" data-retry>Retry</button>`;
+                statusRow.querySelector('[data-retry]').addEventListener('click', () => sendMikaMessage(req.message));
+                mikaMessages.appendChild(statusRow);
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const data = await authFetchJSON('/api/admin/mika/requests?limit=30', 'GET');
+                const requests = (data.requests || []).slice().reverse();
+                requests.forEach(renderHistoryEntry);
+                scrollToBottom();
+            } catch (err) {
+                // History is a convenience (refresh/reconnect recovery) -- a failure
+                // here shouldn't block sending new messages.
+                console.error('Failed to load Mika history:', err.message);
+            }
+        }
+
+        /* ============ SEND ============ */
+        const mikaInput = document.getElementById('mikaInput');
+        const mikaSendBtn = document.getElementById('mikaSendBtn');
+        let sending = false;
+
+        mikaInput.addEventListener('input', () => {
+            mikaInput.style.height = 'auto';
+            mikaInput.style.height = Math.min(mikaInput.scrollHeight, 140) + 'px';
+        });
+        mikaInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitFromInput(); }
+        });
+        mikaSendBtn.addEventListener('click', submitFromInput);
+
+        function submitFromInput() {
+            const text = mikaInput.value.trim();
+            if (!text || sending) return;
+            mikaInput.value = '';
+            mikaInput.style.height = 'auto';
+            sendMikaMessage(text);
+        }
+
+        async function sendMikaMessage(text) {
+            sending = true;
+            mikaSendBtn.disabled = true;
+            appendUserBubble(text);
+            const placeholderId = 'pending-' + Math.random().toString(36).slice(2);
+            appendPendingStatus(placeholderId, text);
+            try {
+                const data = await authFetchJSON('/api/admin/mika/message', 'POST', { message: text });
+                // Swap the placeholder key for the real requestId the server assigned
+                // (or reuse an existing in-flight one, for the idempotency-dedup case)
+                // so a later 'mika_reply' socket push can find this row.
+                const entry = pendingByRequestId.get(placeholderId);
+                pendingByRequestId.delete(placeholderId);
+                if (data.status === 'completed' && data.reply) {
+                    if (entry) entry.statusRow.remove();
+                    appendAssistantBubble(data.reply);
+                } else if (entry) {
+                    pendingByRequestId.set(data.requestId, entry);
+                }
+            } catch (err) {
+                markStatusFailed(placeholderId, err.message || 'Could not reach Mika right now.', text);
+            } finally {
+                sending = false;
+                mikaSendBtn.disabled = false;
+            }
+        }
+
+        /* ============ SOCKET.IO — live reply push ============ */
+        function connectSocket() {
+            const socket = io();
+            socket.on('connect', () => {
+                socket.emit('register_user', { deviceId: getOrCreateDeviceId() });
+            });
+            socket.on('auth_error', () => showGate('Your session expired. Please log back in from the main app.'));
+            socket.on('mika_reply', (payload) => {
+                if (!payload || !payload.requestId) return;
+                if (payload.status === 'completed') {
+                    markStatusCompleted(payload.requestId, payload.reply);
+                } else {
+                    const entry = pendingByRequestId.get(payload.requestId);
+                    markStatusFailed(payload.requestId, payload.error || 'Could not reach Mika right now.', entry ? entry.message : '');
+                }
+            });
+        }
+
+        /* ============ BOOT ============ */
+        (async function boot() {
+            let me;
+            try {
+                me = await authFetchJSON('/api/auth/me', 'GET');
+            } catch (err) {
+                showGate('Please log in from the main app first.');
+                return;
+            }
+            if (!me.isAdmin) {
+                showGate("This conversation is only available to the admin account.");
+                return;
+            }
+            connectSocket();
+            await loadHistory();
+        })();
+    </script>
+</body>
+</html>
