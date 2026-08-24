@@ -3709,6 +3709,15 @@
             from { opacity: 0; transform: translateX(36px); }
             to   { opacity: 1; transform: translateX(0); }
         }
+        .voice-command-btn { min-width:44px; min-height:44px; border:0; border-radius:50%; background:var(--accent-brand); color:#fff; cursor:pointer; display:grid; place-items:center; }
+        .voice-command-btn[aria-pressed="true"] { background:var(--accent-red); animation:voicePulse 1.2s infinite; }
+        @keyframes voicePulse { 50% { box-shadow:0 0 0 8px rgba(255,75,90,.18); } }
+        .voice-control-panel { margin:8px 12px; padding:12px; border:1px solid var(--border-color); border-radius:14px; background:var(--bg-secondary); color:var(--text-normal); }
+        .voice-control-row,.voice-command-confirm-actions { display:flex; gap:8px; align-items:center; }
+        .voice-control-row span { flex:1; }
+        .voice-control-panel button { min-height:40px; }
+        .voice-command-confirm { margin-top:10px; }
+        .voice-command-confirm p { margin:0 0 8px; }
     </style>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
@@ -4001,9 +4010,17 @@
                 <button type="button" class="media-btn-icon" id="attachToggleBtn" title="Attach" onclick="toggleAttachMenu(event)"><span data-icon="plus"></span></button>
                 <button type="button" class="emoji-toggle-btn" onclick="toggleEmojiPicker(event)"><span data-icon="smile"></span></button>
                 <input type="text" id="messageInput" placeholder="Type an encrypted message..." onkeydown="handleInputKeyDown(event)">
+                <button type="button" id="voiceCommandButton" class="voice-command-btn" aria-label="Start voice control" aria-pressed="false" title="Private on-device voice control"><span data-icon="mic"></span></button>
                 <button type="button" class="send-btn" onclick="sendPrivateMessage()" aria-label="Send message"><span data-icon="send"></span></button>
             </div>
         </div>
+        <section id="voiceControlPanel" class="voice-control-panel" data-state="idle" hidden aria-live="polite">
+            <div class="voice-control-row"><span id="voiceCommandStatus"></span><button type="button" id="voiceCommandCancelButton">Cancel</button></div>
+            <div id="voiceCommandConfirm" class="voice-command-confirm" hidden>
+                <p id="voiceCommandSummary"></p>
+                <div class="voice-command-confirm-actions"><button type="button" id="voiceCommandConfirmButton">Confirm</button><button type="button" id="voiceCommandDismissButton">Don’t run</button></div>
+            </div>
+        </section>
 
         <!-- IN-PANEL AUX VIEWS — Profile / Trash / Settings open the same way a chat
              does (replacing this panel's content in place, same mobile open/close
@@ -16145,11 +16162,66 @@ void main(){
     document.getElementById('messageInput').addEventListener('input', handleTypingActivity);
     document.getElementById('messages').addEventListener('scroll', updateScrollToBottomVisibility, { passive: true });
 
+    window.haiVoiceBridge = {
+        getActiveChat: () => currentActiveUser,
+        getContacts: () => [...new Set([...Object.keys(conversationHistory), ...friendsSet])]
+            .filter(username => !isGroupChatKey(username))
+            .map(username => {
+                const profile = getKnownProfile(username) || {};
+                return { username, label: profile.displayName || profile.name || username };
+            }),
+        openChat: username => switchConversationRoom(username),
+        closeChat: () => exitMobileChatView(),
+        search: query => {
+            openUniversalSearch();
+            const input = document.getElementById('universalSearchInput');
+            input.value = query;
+            runUniversalSearch(query);
+        },
+        send: (username, message) => {
+            if (username && username !== currentActiveUser) switchConversationRoom(username);
+            document.getElementById('messageInput').value = message;
+            sendPrivateMessage();
+        },
+        forward: username => {
+            const thread = conversationHistory[currentActiveUser] || [];
+            const msg = [...thread].reverse().find(item => item && item.text);
+            if (!msg) return showToast('There is no current message to forward.', 'error');
+            socket.emit('get_user_public_key', username, async targetKey => {
+                if (!targetKey) return showToast(`User "${username}" was not found. Nothing was forwarded.`, 'error');
+                try {
+                    const encrypted = await encryptPayloadForUser(targetKey, msg.text);
+                    socket.emit('send_private_message', { targetUsername: username, encryptedMessage: encrypted, forwarded: true });
+                    if (!conversationHistory[username]) conversationHistory[username] = [];
+                    const now = Date.now();
+                    conversationHistory[username].push({ id:'msg-'+Math.random().toString(36).slice(2,11), sender:'You', text:msg.text, cipher:encrypted, timestamp:now, forwarded:true });
+                    conversationHistory[username]._lastActivity = now;
+                    persistConversations(); renderSidebarContacts();
+                    showToast(`Successfully forwarded to ${username}!`, 'success');
+                } catch (_) { showToast('Failed to encrypt message. Please try again.', 'error'); }
+            });
+        },
+        changeSetting: (setting, rawValue) => {
+            const value = String(rawValue).toLowerCase();
+            const bool = ['on','enabled','enable','yes'].includes(value) ? true : ['off','disabled','disable','no'].includes(value) ? false : null;
+            if (setting === 'fontSize' && ['small','medium','large'].includes(value)) setMessageFontSize(value);
+            else if (setting === 'readReceipts' && bool !== null) toggleReadReceiptsSetting(bool);
+            else if ((setting === 'notifications' || setting === 'notificationSound') && bool !== null) toggleNotifSoundSetting(bool);
+            else if (setting === 'theme' && value === 'dark') applyStoredTheme();
+            else return showToast('That setting or value is not available for voice control.', 'error');
+            showToast('Setting updated.', 'success');
+        },
+        describe: ({ command, args }) => command === 'send_message' ? `Send “${args.message}” to ${args.username || currentActiveUser}?`
+            : command === 'forward_message' ? `Forward the current message to ${args.username}?`
+            : `Change ${args.setting} to ${args.value}?`,
+    };
+
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('/service-worker.js').catch(err => console.warn('Service worker registration failed:', err));
         });
     }
 </script>
+<script type="module" src="/voice/voice-controller.js"></script>
 </body>
 </html>
