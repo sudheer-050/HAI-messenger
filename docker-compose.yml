@@ -50,6 +50,9 @@ services:
       # hostname resolve on Linux Docker hosts too.
       - OLLAMA_URL=http://host.docker.internal:11434
       - OLLAMA_CHAT_MODEL=llama3.2
+      - KOKORO_TTS_URL=${KOKORO_TTS_URL:-http://kokoro-tts:8880}
+      - KOKORO_TTS_VOICE=${KOKORO_TTS_VOICE:-af_heart}
+      - KOKORO_TTS_MAX_BYTES=${KOKORO_TTS_MAX_BYTES:-5242880}
       # Mika bridge — admin-only. These three vars must be set in .env for the
       # /api/admin/mika/message endpoint to be active (503 otherwise). The
       # backend talks to Multica via the `multica` CLI, not a REST token, so
