@@ -453,6 +453,47 @@
         }
         .panel-back-btn:hover { color: var(--text-normal); }
         .panel-back-btn svg { width: 15px; height: 15px; }
+
+        /* PROJECTS -- portfolio grid, own panel */
+        .project-grid {
+            max-width: 900px;
+            margin: 40px auto 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+            text-align: left;
+        }
+        .project-card {
+            background: var(--glass-weak);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            padding: 22px;
+        }
+        .project-card h3 { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+        .project-card p.project-desc { margin: 0; font-size: 13.5px; color: var(--text-muted); line-height: 1.55; }
+        .project-tech { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; }
+        .tech-pill {
+            font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+            background: rgba(155, 138, 251, 0.14); color: var(--accent-brand);
+        }
+        .project-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+        .project-btn {
+            padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+            text-decoration: none; cursor: pointer; border: 1px solid var(--glass-border);
+            background: var(--glass-weak); color: var(--text-normal);
+            font-family: var(--font-stack); transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .project-btn:hover { transform: translateY(-1px); }
+        .project-btn.primary { background: var(--accent-brand); color: #fff; border-color: transparent; }
+        .project-btn.primary:hover { background: var(--accent-brand-hover); }
+        .project-btn.disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+        .project-detail {
+            display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);
+            font-size: 13px; color: var(--text-muted); line-height: 1.6;
+        }
+        .project-detail.open { display: block; }
     </style>
 </head>
 <body>
@@ -470,6 +511,7 @@
                     <a href="#" data-panel="hai" onclick="event.preventDefault(); showPanel('hai');">HAI Messenger</a>
                     <a href="#" data-panel="h" onclick="event.preventDefault(); showPanel('h');">H AI</a>
                     <a href="#" data-panel="app-three" onclick="event.preventDefault(); showPanel('app-three');">Auto Data Analyst</a>
+                    <a href="#" data-panel="projects" onclick="event.preventDefault(); showPanel('projects');">Projects</a>
                 </nav>
 
                 <button class="menu-toggle" id="menuToggleBtn" aria-label="Toggle menu" aria-expanded="false">
@@ -481,6 +523,7 @@
                 <a href="#" data-panel="hai" onclick="event.preventDefault(); showPanel('hai'); mobileNav.classList.remove('open');">HAI Messenger</a>
                 <a href="#" data-panel="h" onclick="event.preventDefault(); showPanel('h'); mobileNav.classList.remove('open');">H AI</a>
                 <a href="#" data-panel="app-three" onclick="event.preventDefault(); showPanel('app-three'); mobileNav.classList.remove('open');">Auto Data Analyst</a>
+                <a href="#" data-panel="projects" onclick="event.preventDefault(); showPanel('projects'); mobileNav.classList.remove('open');">Projects</a>
             </div>
         </header>
 
@@ -860,6 +903,124 @@
                     </a>
                 </div>
             </div>
+
+            <!-- PROJECTS -->
+            <div class="app-panel" id="panel-projects">
+                <button type="button" class="panel-back-btn" onclick="showPanel('home')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    All apps
+                </button>
+                <div class="badge"><b>Portfolio</b> Everything Sudheer's built</div>
+                <h1>Projects.<br><span class="accent">All in one place.</span></h1>
+                <p class="subtitle">A running list of things Sudheer has built and worked on — from live apps to
+                    coursework and hardware. Open the live ones, or dig into how the rest work.</p>
+
+                <div class="project-grid">
+                    <div class="project-card">
+                        <h3>Auto Data Analyst</h3>
+                        <p class="project-desc">Upload a CSV and get automated cleaning, exploratory analysis, and model
+                            comparison in minutes — no data science background required.</p>
+                        <div class="project-tech">
+                            <span class="tech-pill">Flask</span>
+                            <span class="tech-pill">pandas</span>
+                            <span class="tech-pill">scikit-learn</span>
+                            <span class="tech-pill">XGBoost</span>
+                            <span class="tech-pill">LightGBM</span>
+                            <span class="tech-pill">CatBoost</span>
+                        </div>
+                        <div class="project-actions">
+                            <a href="https://myhai.org/analyst/" class="project-btn primary">Open</a>
+                            <button type="button" class="project-btn" onclick="toggleProjectDetail(this, 'detail-analyst')">Know more</button>
+                        </div>
+                        <div class="project-detail" id="detail-analyst">
+                            Auto-cleans uploaded CSVs, runs exploratory data analysis, and trains/compares 15+ ML
+                            models — including XGBoost, LightGBM, and CatBoost — with cross-validation and
+                            ensembling. Generates plain-English recommendations, includes a guided editable pipeline
+                            and a Q&amp;A chat over your data, and can automatically join multiple related datasets.
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>HAI Messenger</h3>
+                        <p class="project-desc">This site itself — a free, self-hosted, end-to-end encrypted chat app
+                            with real-time messaging, mini-games, and anonymous Nearby chat.</p>
+                        <div class="project-tech">
+                            <span class="tech-pill">Node.js</span>
+                            <span class="tech-pill">Express</span>
+                            <span class="tech-pill">Socket.IO</span>
+                            <span class="tech-pill">Redis</span>
+                            <span class="tech-pill">Docker</span>
+                        </div>
+                        <div class="project-actions">
+                            <a href="/index.html" class="project-btn primary">Open</a>
+                            <button type="button" class="project-btn" onclick="toggleProjectDetail(this, 'detail-hai')">Know more</button>
+                        </div>
+                        <div class="project-detail" id="detail-hai">
+                            Hybrid RSA-OAEP-2048 + AES-256-GCM envelope encryption, so the server only ever relays
+                            ciphertext. Also includes voice notes, photo and document sharing, in-chat mini-games,
+                            and an ephemeral anonymous "Nearby" chat mode. Open source:
+                            <a href="https://github.com/sudheer-050/HAI-messenger" style="color: var(--accent-brand);">github.com/sudheer-050/HAI-messenger</a>.
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>Personal AI Agent</h3>
+                        <p class="project-desc">A self-directed, locally-run AI agent for decision-support and
+                            companionship — ongoing work is adding text-to-speech and emotion-aware voice.</p>
+                        <div class="project-tech">
+                            <span class="tech-pill">Python</span>
+                            <span class="tech-pill">Ollama</span>
+                            <span class="tech-pill">Llama 3</span>
+                        </div>
+                        <div class="project-actions">
+                            <a href="https://github.com/sudheer-050/H-AI" class="project-btn primary">View on GitHub</a>
+                            <button type="button" class="project-btn" onclick="toggleProjectDetail(this, 'detail-agent')">Know more</button>
+                        </div>
+                        <div class="project-detail" id="detail-agent">
+                            A terminal-based assistant that supports multiple users with unique IDs, stores
+                            conversation history and monthly keyword summaries, and recalls relevant past context to
+                            keep chats personal and consistent over time. No live deployment yet — run it locally
+                            from the repo.
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>Dating-Website Application</h3>
+                        <p class="project-desc">A team project for DePaul's "Machine Learning for Managers" course,
+                            incorporating AI-driven matching logic.</p>
+                        <div class="project-tech">
+                            <span class="tech-pill">Python</span>
+                            <span class="tech-pill">Machine Learning</span>
+                        </div>
+                        <div class="project-actions">
+                            <button type="button" class="project-btn" onclick="toggleProjectDetail(this, 'detail-dating')">Know more</button>
+                        </div>
+                        <div class="project-detail" id="detail-dating">
+                            Built as a team for a graduate machine learning course; the focus was designing and
+                            evaluating a matching algorithm rather than shipping a production app. No live
+                            deployment or public repo.
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>AI-Powered Combat Robot</h3>
+                        <p class="project-desc">Undergraduate project — designed the code architecture for an
+                            AI-powered robot built for a robot-fighting competition.</p>
+                        <div class="project-tech">
+                            <span class="tech-pill">Embedded C/C++</span>
+                            <span class="tech-pill">Control Systems</span>
+                        </div>
+                        <div class="project-actions">
+                            <button type="button" class="project-btn" onclick="toggleProjectDetail(this, 'detail-robot')">Know more</button>
+                        </div>
+                        <div class="project-detail" id="detail-robot">
+                            Led the software and code architecture design for an autonomous combat robot competing
+                            in a robot-fighting competition, focusing on control logic and decision-making under
+                            competition constraints. A physical hardware project with no live deployment.
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </section>
 
@@ -889,6 +1050,12 @@
             // (a full panel change, not a scroll within one page), so animating
             // the scroll position reads as a glitch rather than a transition.
             window.scrollTo({ top: 0, behavior: 'auto' });
+        }
+
+        function toggleProjectDetail(btn, id) {
+            const detail = document.getElementById(id);
+            const open = detail.classList.toggle('open');
+            btn.textContent = open ? 'Show less' : 'Know more';
         }
     </script>
 </body>
