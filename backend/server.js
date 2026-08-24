@@ -59,6 +59,12 @@ if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
 
 app.use(express.json({ limit: '25mb' })); // encrypted email backups can be several MB base64-encoded
 app.use(cookieParser());
+app.get('/mika.html', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    next();
+}, requireAuth, requireAdmin, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'mika.html'));
+});
 app.use(express.static(path.join(__dirname, 'public'), {
     // landing.html (marketing homepage) is what "/" resolves to now; the actual
     // app/login lives at the explicit /index.html path -- see manifest.json's
@@ -2387,6 +2393,25 @@ async function createMikaBridgeIssue(correlationId, adminMessage) {
     }
 }
 
+async function verifyMikaBridgeIssue(issueId) {
+    const verifyOut = await runMultica(['issue', 'get', issueId, '--output', 'json'], 15000);
+    const issue = JSON.parse(verifyOut);
+    if (
+        issue.parent_issue_id !== MIKA_CONFIG.parentIssueId ||
+        issue.assignee_id !== MIKA_CONFIG.agentId ||
+        issue.project_id !== MIKA_CONFIG.projectId
+    ) throw new Error('persisted issue failed allowlist verification');
+    return issueId;
+}
+
+async function findExistingMikaBridgeIssue(correlationId) {
+    const stdout = await runMultica(['issue', 'search', buildIssueTitle(correlationId), '--limit', '20', '--output', 'json'], 15000);
+    const data = JSON.parse(stdout);
+    const issues = Array.isArray(data) ? data : (data.issues || data.items || []);
+    const exact = issues.find(issue => issue.title === buildIssueTitle(correlationId));
+    return exact ? verifyMikaBridgeIssue(exact.id) : null;
+}
+
 const MIKA_POLL_INTERVAL_MS = 4000;
 const MIKA_REPLY_TIMEOUT_MS = 90000;
 
@@ -2416,14 +2441,21 @@ const ipLimitMika = rateLimit({
 // for Mika's reply up to the timeout, persist the outcome, and push it to
 // the admin's own connected sockets. Never touches the original res object —
 // the HTTP handler has already responded by the time this runs.
-async function processMikaRequest({ id, correlationId, message, adminUsername }) {
-    const deadline = Date.now() + MIKA_REPLY_TIMEOUT_MS;
+async function processMikaRequest({ id, correlationId, message, adminUsername, issueId: persistedIssueId, createdAt }) {
+    const deadline = createdAt
+        ? new Date(createdAt).getTime() + MIKA_REPLY_TIMEOUT_MS
+        : Date.now() + MIKA_REPLY_TIMEOUT_MS;
     try {
-        const issueId = await createMikaBridgeIssue(correlationId, message);
-        await pgPool.query(
-            'UPDATE mika_bridge_requests SET multica_issue_id = $1, updated_at = now() WHERE id = $2',
-            [issueId, id]
-        );
+        let issueId = persistedIssueId
+            ? await verifyMikaBridgeIssue(persistedIssueId)
+            : await findExistingMikaBridgeIssue(correlationId);
+        if (!issueId) issueId = await createMikaBridgeIssue(correlationId, message);
+        if (!persistedIssueId) {
+            await pgPool.query(
+                'UPDATE mika_bridge_requests SET multica_issue_id = $1, updated_at = now() WHERE id = $2 AND multica_issue_id IS NULL',
+                [issueId, id]
+            );
+        }
 
         let reply = null;
         while (Date.now() < deadline) {
@@ -2470,7 +2502,7 @@ async function recoverPendingMikaRequests() {
     if (!MIKA_CONFIGURED) return;
     try {
         const { rows } = await pgPool.query(
-            "SELECT id, correlation_id, message, admin_username, created_at FROM mika_bridge_requests WHERE status = 'pending'"
+            "SELECT id, correlation_id, message, admin_username, multica_issue_id, created_at FROM mika_bridge_requests WHERE status = 'pending'"
         );
         for (const row of rows) {
             const age = Date.now() - new Date(row.created_at).getTime();
@@ -2485,6 +2517,7 @@ async function recoverPendingMikaRequests() {
             console.log(`🌉 Resuming Mika bridge request ${row.correlation_id} after restart`);
             processMikaRequest({
                 id: row.id, correlationId: row.correlation_id, message: row.message, adminUsername: row.admin_username,
+                issueId: row.multica_issue_id, createdAt: row.created_at,
             }).catch(err => console.error(`mika bridge resume [${row.correlation_id}] failed:`, err.message));
         }
     } catch (err) {
