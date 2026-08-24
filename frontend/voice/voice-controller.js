@@ -34,6 +34,13 @@ export function createVoiceController({ bridge, elements, Adapter = STTAdapter, 
     if (parsed.command === 'send_message' && !args.username && !bridge.getActiveChat()) {
       fail('Open a chat manually before sending without a named contact.'); return null;
     }
+    if (parsed.command === 'forward_message') {
+      const target = bridge.getForwardTarget?.();
+      if (!target?.messageId) {
+        fail('Select a message using its message menu before forwarding.'); return null;
+      }
+      args.messageId = target.messageId;
+    }
     return { command: parsed.command, args };
   };
   const execute = ({ command, args }) => {
@@ -41,7 +48,7 @@ export function createVoiceController({ bridge, elements, Adapter = STTAdapter, 
     else if (command === 'close_chat') bridge.closeChat();
     else if (command === 'search') bridge.search(args.query);
     else if (command === 'send_message') bridge.send(args.username, args.message);
-    else if (command === 'forward_message') bridge.forward(args.username);
+    else if (command === 'forward_message') bridge.forward(args.username, args.messageId);
     else if (command === 'change_setting') bridge.changeSetting(args.setting, args.value);
     setState('idle');
   };

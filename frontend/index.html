@@ -15344,6 +15344,8 @@ void main(){
         return units.every(u => EMOJI_GRAPHEME_RE.test(u));
     }
 
+    let voiceCurrentMessageId = null;
+
     function findMessageById(msgId) {
         for (const user in conversationHistory) {
             const found = (conversationHistory[user] || []).find(m => m.id === msgId);
@@ -15451,7 +15453,10 @@ void main(){
         menuBtn.className = 'msg-trigger-btn';
         menuBtn.title = 'Message options';
         menuBtn.innerHTML = icon('more');
-        menuBtn.onclick = (e) => openMessageActionsMenu(actions, e.currentTarget);
+        menuBtn.onclick = (e) => {
+            if (!readOnly) voiceCurrentMessageId = msg.id || null;
+            openMessageActionsMenu(actions, e.currentTarget);
+        };
         actionsDiv.appendChild(menuBtn);
 
         if (!readOnly) {
@@ -15947,6 +15952,13 @@ void main(){
         const dest = ((await showPrompt("Enter target contact handle username to forward this text:")) || "").trim().toLowerCase();
         if (!dest) return;
 
+        forwardMessageToContact(id, dest);
+    }
+
+    function forwardMessageToContact(id, dest) {
+        const msg = (conversationHistory[currentActiveUser] || []).find(m => m.id === id && m.text);
+        if (!msg) return showToast('There is no selected message to forward.', 'error');
+
         socket.emit('get_user_public_key', dest, async (targetPubKeyBase64) => {
             if (!targetPubKeyBase64) {
                 return showToast(`User "${dest}" was not found. Nothing was forwarded.`, 'error');
@@ -16164,6 +16176,10 @@ void main(){
 
     window.haiVoiceBridge = {
         getActiveChat: () => currentActiveUser,
+        getForwardTarget: () => {
+            const msg = (conversationHistory[currentActiveUser] || []).find(item => item && item.id === voiceCurrentMessageId && item.text);
+            return msg ? { messageId: msg.id } : null;
+        },
         getContacts: () => [...new Set([...Object.keys(conversationHistory), ...friendsSet])]
             .filter(username => !isGroupChatKey(username))
             .map(username => {
@@ -16183,24 +16199,7 @@ void main(){
             document.getElementById('messageInput').value = message;
             sendPrivateMessage();
         },
-        forward: username => {
-            const thread = conversationHistory[currentActiveUser] || [];
-            const msg = [...thread].reverse().find(item => item && item.text);
-            if (!msg) return showToast('There is no current message to forward.', 'error');
-            socket.emit('get_user_public_key', username, async targetKey => {
-                if (!targetKey) return showToast(`User "${username}" was not found. Nothing was forwarded.`, 'error');
-                try {
-                    const encrypted = await encryptPayloadForUser(targetKey, msg.text);
-                    socket.emit('send_private_message', { targetUsername: username, encryptedMessage: encrypted, forwarded: true });
-                    if (!conversationHistory[username]) conversationHistory[username] = [];
-                    const now = Date.now();
-                    conversationHistory[username].push({ id:'msg-'+Math.random().toString(36).slice(2,11), sender:'You', text:msg.text, cipher:encrypted, timestamp:now, forwarded:true });
-                    conversationHistory[username]._lastActivity = now;
-                    persistConversations(); renderSidebarContacts();
-                    showToast(`Successfully forwarded to ${username}!`, 'success');
-                } catch (_) { showToast('Failed to encrypt message. Please try again.', 'error'); }
-            });
-        },
+        forward: (username, messageId) => forwardMessageToContact(messageId, username),
         changeSetting: (setting, rawValue) => {
             const value = String(rawValue).toLowerCase();
             const bool = ['on','enabled','enable','yes'].includes(value) ? true : ['off','disabled','disable','no'].includes(value) ? false : null;
@@ -16212,7 +16211,7 @@ void main(){
             showToast('Setting updated.', 'success');
         },
         describe: ({ command, args }) => command === 'send_message' ? `Send “${args.message}” to ${args.username || currentActiveUser}?`
-            : command === 'forward_message' ? `Forward the current message to ${args.username}?`
+            : command === 'forward_message' ? `Forward the selected message to ${args.username}?`
             : `Change ${args.setting} to ${args.value}?`,
     };
 
