@@ -2,6 +2,10 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = require('fs/promises');
+const os = require('os');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -12,6 +16,9 @@ const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const cookieParser = require('cookie-parser');
 const { rateLimit } = require('express-rate-limit');
+const {
+    loadMikaConfig, isMikaConfigured, computeContentHash, buildIssueTitle, selectMikaReply,
+} = require('./mika-bridge');
 
 const app = express();
 
@@ -141,6 +148,32 @@ pgPool.query(`
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 `).then(() => console.log('📊 Postgres analytics tables ready')).catch(err => console.error('Postgres analytics init failed:', err.message));
+
+/* MIKA BRIDGE correlation state (MYAG-130) — one row per admin message sent to
+   Mika. Persisted (not just Redis) so a server restart mid-poll can resume
+   in-flight requests instead of silently losing them, and so the admin UI can
+   restore request/reply history across refresh/reconnect. */
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS mika_bridge_requests (
+        id                UUID PRIMARY KEY,
+        admin_username    VARCHAR(20) NOT NULL,
+        content_hash      VARCHAR(64) NOT NULL,
+        correlation_id    VARCHAR(16) NOT NULL,
+        message           TEXT NOT NULL,
+        multica_issue_id  VARCHAR(64),
+        status            VARCHAR(12) NOT NULL DEFAULT 'pending',
+        reply             TEXT,
+        error             TEXT,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS mika_bridge_requests_admin_idx ON mika_bridge_requests (admin_username, created_at DESC);
+    CREATE INDEX IF NOT EXISTS mika_bridge_requests_hash_idx ON mika_bridge_requests (content_hash, created_at DESC);
+    CREATE INDEX IF NOT EXISTS mika_bridge_requests_status_idx ON mika_bridge_requests (status);
+`).then(() => {
+    console.log('🌉 Postgres Mika bridge table ready');
+    recoverPendingMikaRequests();
+}).catch(err => console.error('Postgres Mika bridge init failed:', err.message));
 
 pgPool.query(`
     CREATE TABLE IF NOT EXISTS app_theme_settings (
@@ -2235,22 +2268,39 @@ app.put('/api/admin/theme', requireAuth, requireAdmin, async (req, res) => {
 });
 
 /* ============ MIKA BRIDGE — admin-only Multica agent chat ============
-   Security contract (MYAG-127):
+   Security contract (MYAG-127), implementation (MYAG-130):
    - Every request passes requireAuth (JWT) then requireAdmin (DB is_admin check).
      UI hiding is NOT the gate — the server enforces this independently.
-   - Multica credentials live only in env vars; they are never returned in any
-     API response, never logged, never passed via shell string interpolation.
-   - All Multica API calls go out over HTTPS to MULTICA_SERVER_URL.
-   - Message text reaches Multica only through the JSON body of the issue-create
-     request — never interpolated into a shell command or query string.
-   - The workspace/project/agent allowlist is hard-wired to env vars checked at
-     startup; the endpoint refuses any call that would target a different entity.
-   - Idempotency: a SHA-256 content fingerprint stored in Redis prevents
-     duplicate issues from retries within a 5-minute dedup window.
+   - Multica is reached ONLY through the `multica` CLI (execFile with an argv
+     array — never a shell, never string-concatenated). This is the one
+     supported, verified integration surface for the platform; there is no
+     documented public Multica REST API to call directly instead. The CLI
+     must be installed and authenticated (as a scoped service identity with
+     permission to create/assign issues in the configured project) on the
+     host/container running this server — see .env.example for the runtime
+     env vars and the manual provisioning note.
+   - The admin's message reaches Multica only via a temp file passed to
+     `--description-file`; it is never interpolated into a shell command or
+     used to build the argv array itself, so there is no injection vector.
+   - The workspace/project/agent/parent-issue allowlist is hard-wired to env
+     vars checked at startup; every created issue is re-fetched and verified
+     against that allowlist before it is trusted, and only a top-level
+     'comment' authored by MIKA_AGENT_ID on that exact issue is ever relayed.
+   - Requests are processed asynchronously: the endpoint ACKs with 202 and a
+     requestId immediately, then a background poll creates the Multica issue
+     and watches for Mika's reply, pushing the result over Socket.IO to the
+     admin's own connected sockets (existing pushToUserSocket registry —
+     already identity-scoped via the JWT-verified register_user handshake).
+   - Every request/reply/status is persisted in mika_bridge_requests, so a
+     server restart resumes in-flight polls (see recoverPendingMikaRequests)
+     instead of silently losing them, and the admin UI can restore history
+     across refresh/reconnect via GET /api/admin/mika/requests.
+   - Idempotency: identical (admin, message) within a 5-minute window reuses
+     the existing pending/completed row instead of creating a duplicate issue.
    - Rate limits: IP-level (express-rate-limit) + per-user Redis counter.
-   - Every call is logged to analytics_events ('mika_message_sent') for audit.
-   - Timeouts: issue-create has a 15 s hard ceiling; reply polling stops at 60 s
-     and returns 503 rather than hanging the connection indefinitely.
+   - Every send is logged to analytics_events ('mika_message_sent') for audit.
+   - CLI stderr/stdout is never forwarded to the client on failure — only a
+     generic message; the real error is logged server-side only.
 
    Threat model (abbreviated):
    ┌─────────────────────────────────────────────────┬────────────────────────────────────────────────────┐
@@ -2258,100 +2308,101 @@ app.put('/api/admin/theme', requireAuth, requireAdmin, async (req, res) => {
    ├─────────────────────────────────────────────────┼────────────────────────────────────────────────────┤
    │ Non-admin user calls the endpoint               │ requireAuth + requireAdmin (DB check, not JWT-only)│
    │ Admin JWT stolen/replayed                       │ httpOnly cookie; is_admin still re-checked from DB │
-   │ Message text injected into Multica API call     │ JSON body only; no shell or query-string concat    │
-   │ MULTICA_API_TOKEN leaked to browser             │ Env var only; never in any response                │
+   │ Message text injected into the Multica call     │ execFile argv array + description FILE; no shell  │
+   │ Reply relayed from wrong issue/author           │ Created issue re-verified; comment filtered by     │
+   │                                                  │ agent id + issue id before being trusted           │
    │ Spam creating thousands of Multica issues        │ 5/10 min per-user + 10/15 min IP rate limit        │
-   │ Retry storm duplicating issues                  │ SHA-256 content fingerprint idempotency in Redis   │
+   │ Retry storm duplicating issues                  │ Persisted content-hash idempotency (5 min window)  │
    │ Wrong workspace/project targeted                │ Env-var allowlist; startup warning if unset        │
-   │ Hung request from slow/offline Multica          │ 60 s poll deadline → 503, not a hung connection    │
+   │ Hung request from slow/offline Multica          │ Async design — HTTP request never blocks on it;    │
+   │                                                  │ background poll gives up after MIKA_REPLY_TIMEOUT  │
+   │ Server restart loses an in-flight request       │ Persisted row + recoverPendingMikaRequests on boot │
+   │ Non-admin receives another admin's reply        │ Delivery targets only the requesting admin's own   │
+   │                                                  │ registered sockets/username, never broadcast        │
    │ Credentials committed to git                    │ .env gitignored; .env.example has placeholders only│
-   └─────────────────────────────────────────────────┴────────────────────────────────────────────────────┘
+   └─────────────────────────────────────────────────┴────────────────────────────────────────────────────┘ */
 
-   The Multica REST API base is MULTICA_SERVER_URL (defaults: https://api.multica.ai).
-   Auth header: Authorization: Bearer <MULTICA_API_TOKEN>.
-   Endpoint shapes (verified against Multica API at implementation time):
-     Create issue:   POST   {serverUrl}/api/v1/workspaces/{workspaceId}/issues
-     List comments:  GET    {serverUrl}/api/v1/workspaces/{workspaceId}/issues/{issueId}/comments
-     Get issue:      GET    {serverUrl}/api/v1/workspaces/{workspaceId}/issues/{issueId}
-   The backend implementation stage (MYAG-126 stage 2) fills in these calls;
-   this stage defines the contract and security wrapper around them. */
-
-const MIKA_CONFIG = {
-    apiToken:      process.env.MULTICA_API_TOKEN      || null,
-    serverUrl:     (process.env.MULTICA_SERVER_URL    || 'https://api.multica.ai').replace(/\/$/, ''),
-    workspaceId:   process.env.MULTICA_WORKSPACE_ID   || null,
-    projectId:     process.env.MULTICA_PROJECT_ID     || null,
-    agentId:       process.env.MIKA_AGENT_ID          || null,
-    parentIssueId: process.env.MIKA_PARENT_ISSUE_ID   || null,
-};
-const MIKA_CONFIGURED = Object.values(MIKA_CONFIG).every(Boolean);
+const MIKA_CONFIG = loadMikaConfig();
+const MIKA_CONFIGURED = isMikaConfigured(MIKA_CONFIG);
 if (!MIKA_CONFIGURED) {
-    const missing = Object.entries(MIKA_CONFIG).filter(([, v]) => !v).map(([k]) => k);
-    console.warn(`⚠️  Mika bridge disabled — missing env vars: ${missing.join(', ')}`);
+    console.warn('⚠️  Mika bridge disabled — missing one of MULTICA_PROJECT_ID / MIKA_AGENT_ID / MIKA_PARENT_ISSUE_ID');
 }
 
-function mikaApiHeaders() {
-    return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${MIKA_CONFIG.apiToken}`,
-    };
+function mikaCliArgs(subArgs) {
+    return MIKA_CONFIG.workspaceId ? ['--workspace-id', MIKA_CONFIG.workspaceId, ...subArgs] : subArgs;
 }
 
-// Creates a child issue in the allowlisted workspace/project assigned to Mika.
-// The message is placed in the issue description — never in a shell command.
-async function createMikaBridgeIssue(correlationId, adminMessage) {
-    const url = `${MIKA_CONFIG.serverUrl}/api/v1/workspaces/${MIKA_CONFIG.workspaceId}/issues`;
-    const res = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: mikaApiHeaders(),
-        body: JSON.stringify({
-            title: `[HAI bridge ${correlationId}] Admin message`,
-            description: adminMessage,
-            project_id: MIKA_CONFIG.projectId,
-            parent_issue_id: MIKA_CONFIG.parentIssueId,
-            assignee_id: MIKA_CONFIG.agentId,
-            status: 'todo',
-        }),
-    }, 15000);
-    if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`Multica issue create ${res.status}: ${body.slice(0, 200)}`);
+// Every Multica call goes through here so there is exactly one place that
+// shells out — always via execFile (argv array, no shell) and always with a
+// hard timeout so a hung CLI process can never hang the poll loop forever.
+async function runMultica(subArgs, timeoutMs) {
+    try {
+        const { stdout } = await execFileAsync(MIKA_CONFIG.cliPath, mikaCliArgs(subArgs), {
+            timeout: timeoutMs,
+            windowsHide: true,
+            maxBuffer: 2 * 1024 * 1024,
+        });
+        return stdout;
+    } catch (err) {
+        // stderr/stdout from a failed CLI call can contain internal paths —
+        // log server-side only, never let it reach an HTTP response.
+        console.error('multica CLI call failed:', err.message);
+        throw new Error('multica_cli_error');
     }
-    const data = await res.json();
-    return data.id || data.issue?.id;
+}
+
+// Creates a child issue in the allowlisted project assigned to Mika, then
+// re-fetches it to confirm it actually landed where it was asked to before
+// the caller ever polls it for a reply.
+async function createMikaBridgeIssue(correlationId, adminMessage) {
+    const tmpPath = path.join(os.tmpdir(), `mika-bridge-${correlationId}-${crypto.randomBytes(4).toString('hex')}.md`);
+    await fsp.writeFile(tmpPath, adminMessage, 'utf8');
+    try {
+        const createOut = await runMultica([
+            'issue', 'create',
+            '--title', buildIssueTitle(correlationId),
+            '--description-file', tmpPath,
+            '--project', MIKA_CONFIG.projectId,
+            '--parent', MIKA_CONFIG.parentIssueId,
+            '--assignee-id', MIKA_CONFIG.agentId,
+            '--status', 'todo',
+            '--output', 'json',
+        ], 20000);
+        const created = JSON.parse(createOut);
+        const issueId = created.id || created.issue?.id;
+        if (!issueId) throw new Error('multica issue create returned no id');
+
+        const verifyOut = await runMultica(['issue', 'get', issueId, '--output', 'json'], 15000);
+        const issue = JSON.parse(verifyOut);
+        if (
+            issue.parent_issue_id !== MIKA_CONFIG.parentIssueId ||
+            issue.assignee_id !== MIKA_CONFIG.agentId ||
+            issue.project_id !== MIKA_CONFIG.projectId
+        ) {
+            throw new Error('created issue failed allowlist verification');
+        }
+        return issueId;
+    } finally {
+        fsp.unlink(tmpPath).catch(() => {});
+    }
 }
 
 const MIKA_POLL_INTERVAL_MS = 4000;
-const MIKA_REPLY_TIMEOUT_MS = 60000;
+const MIKA_REPLY_TIMEOUT_MS = 90000;
 
-// Polls the issue's comment list until an agent comment authored by MIKA_AGENT_ID
-// appears, then returns its text. Returns null on timeout.
-// Only the final, first-level comment is returned — bookkeeping/progress replies
-// are skipped so the admin only sees Mika's finished answer.
-async function pollMikaReply(issueId, deadlineMs) {
-    const url = `${MIKA_CONFIG.serverUrl}/api/v1/workspaces/${MIKA_CONFIG.workspaceId}/issues/${issueId}/comments?root_only=true&limit=20`;
-    while (Date.now() < deadlineMs) {
-        await new Promise(r => setTimeout(r, MIKA_POLL_INTERVAL_MS));
-        try {
-            const res = await fetchWithTimeout(url, { method: 'GET', headers: mikaApiHeaders() }, 10000);
-            if (!res.ok) continue;
-            const data = await res.json();
-            const comments = Array.isArray(data) ? data : (data.comments || data.items || []);
-            const agentComment = comments.find(c =>
-                (c.author_id === MIKA_CONFIG.agentId || c.creator_id === MIKA_CONFIG.agentId) &&
-                c.body && !c.is_bookkeeping
-            );
-            if (agentComment) return (agentComment.body || agentComment.content || '').trim();
-        } catch (pollErr) {
-            console.warn('mika poll error (will retry):', pollErr.message);
-        }
-    }
-    return null;
+// One poll attempt: lists the issue's top-level comments and returns Mika's
+// reply text, or null if she hasn't answered yet.
+async function pollMikaReplyOnce(issueId) {
+    const stdout = await runMultica(['issue', 'comment', 'list', issueId, '--roots-only', '--output', 'json'], 15000);
+    const data = JSON.parse(stdout);
+    const comments = Array.isArray(data) ? data : (data.comments || data.items || []);
+    return selectMikaReply(comments, { issueId, agentId: MIKA_CONFIG.agentId });
 }
 
 const MIKA_RATE_LIMIT = 5;
 const MIKA_RATE_WINDOW = 10 * 60;
 const MIKA_MESSAGE_MAX = 4000;
+const MIKA_IDEMPOTENCY_WINDOW_SQL = "created_at > now() - interval '5 minutes'";
 
 const ipLimitMika = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -2360,6 +2411,86 @@ const ipLimitMika = rateLimit({
     legacyHeaders: false,
     message: { error: 'Too many messages to Mika from this IP. Please try again later.' },
 });
+
+// Drives one request end to end in the background: create the issue, poll
+// for Mika's reply up to the timeout, persist the outcome, and push it to
+// the admin's own connected sockets. Never touches the original res object —
+// the HTTP handler has already responded by the time this runs.
+async function processMikaRequest({ id, correlationId, message, adminUsername }) {
+    const deadline = Date.now() + MIKA_REPLY_TIMEOUT_MS;
+    try {
+        const issueId = await createMikaBridgeIssue(correlationId, message);
+        await pgPool.query(
+            'UPDATE mika_bridge_requests SET multica_issue_id = $1, updated_at = now() WHERE id = $2',
+            [issueId, id]
+        );
+
+        let reply = null;
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, MIKA_POLL_INTERVAL_MS));
+            try {
+                reply = await pollMikaReplyOnce(issueId);
+            } catch (pollErr) {
+                console.warn(`mika poll [${correlationId}] error (will retry):`, pollErr.message);
+            }
+            if (reply) break;
+        }
+
+        if (!reply) {
+            await pgPool.query("UPDATE mika_bridge_requests SET status = 'timeout', updated_at = now() WHERE id = $1", [id]);
+            await pushToUserSocket(adminUsername, 'mika_reply', {
+                requestId: id, correlationId, status: 'timeout',
+                error: "Mika is thinking — she didn't respond in time. Try again in a moment.",
+            });
+            return;
+        }
+
+        await pgPool.query(
+            "UPDATE mika_bridge_requests SET status = 'completed', reply = $1, updated_at = now() WHERE id = $2",
+            [reply, id]
+        );
+        await pushToUserSocket(adminUsername, 'mika_reply', { requestId: id, correlationId, status: 'completed', reply });
+    } catch (err) {
+        console.error(`mika bridge [${correlationId}] failed:`, err.message);
+        await pgPool.query(
+            "UPDATE mika_bridge_requests SET status = 'failed', error = 'internal_error', updated_at = now() WHERE id = $1",
+            [id]
+        ).catch(() => {});
+        await pushToUserSocket(adminUsername, 'mika_reply', {
+            requestId: id, correlationId, status: 'failed',
+            error: 'Could not reach Mika right now. Please try again.',
+        });
+    }
+}
+
+// Runs once at boot, after the mika_bridge_requests table is ready. Any row
+// still 'pending' from before a restart is either resumed (still within its
+// timeout window) or marked 'timeout' — never left silently stuck forever.
+async function recoverPendingMikaRequests() {
+    if (!MIKA_CONFIGURED) return;
+    try {
+        const { rows } = await pgPool.query(
+            "SELECT id, correlation_id, message, admin_username, created_at FROM mika_bridge_requests WHERE status = 'pending'"
+        );
+        for (const row of rows) {
+            const age = Date.now() - new Date(row.created_at).getTime();
+            if (age >= MIKA_REPLY_TIMEOUT_MS) {
+                await pgPool.query("UPDATE mika_bridge_requests SET status = 'timeout', updated_at = now() WHERE id = $1", [row.id]);
+                await pushToUserSocket(row.admin_username, 'mika_reply', {
+                    requestId: row.id, correlationId: row.correlation_id, status: 'timeout',
+                    error: "Mika is thinking — she didn't respond in time. Try again in a moment.",
+                });
+                continue;
+            }
+            console.log(`🌉 Resuming Mika bridge request ${row.correlation_id} after restart`);
+            processMikaRequest({
+                id: row.id, correlationId: row.correlation_id, message: row.message, adminUsername: row.admin_username,
+            }).catch(err => console.error(`mika bridge resume [${row.correlation_id}] failed:`, err.message));
+        }
+    } catch (err) {
+        console.error('Mika bridge recovery failed:', err.message);
+    }
+}
 
 app.post('/api/admin/mika/message', requireAuth, requireAdmin, ipLimitMika, async (req, res) => {
     if (!MIKA_CONFIGURED) {
@@ -2379,34 +2510,72 @@ app.post('/api/admin/mika/message', requireAuth, requireAdmin, ipLimitMika, asyn
         return res.status(429).json({ error: 'Too many messages to Mika. Please slow down.' });
     }
 
-    // 5-minute idempotency window: same user + same message text → same response,
-    // no duplicate Multica issue.
-    const contentHash = crypto.createHash('sha256').update(`${req.username}:${message}`).digest('hex').slice(0, 24);
-    const idempotencyKey = `mika:idem:${contentHash}`;
-    const cached = await redisClient.get(idempotencyKey);
-    if (cached) {
-        logAnalyticsEvent('mika_message_dedup', req.username);
-        return res.json({ reply: JSON.parse(cached).reply, cached: true });
-    }
-
-    const correlationId = crypto.randomBytes(4).toString('hex').toUpperCase();
-    const deadline = Date.now() + MIKA_REPLY_TIMEOUT_MS;
-
     try {
-        logAnalyticsEvent('mika_message_sent', req.username);
-        const issueId = await createMikaBridgeIssue(correlationId, message);
-        if (!issueId) throw new Error('Multica returned no issue ID');
+        const contentHash = computeContentHash(req.username, message);
 
-        const reply = await pollMikaReply(issueId, deadline);
-        if (!reply) {
-            return res.status(503).json({ error: "Mika is thinking — she didn't respond in time. Try again in a moment." });
+        // 5-minute idempotency window: an identical message from the same
+        // admin reuses the existing request instead of creating a new issue.
+        const existing = await pgPool.query(
+            `SELECT id, correlation_id, status, reply FROM mika_bridge_requests
+             WHERE admin_username = $1 AND content_hash = $2 AND ${MIKA_IDEMPOTENCY_WINDOW_SQL}
+             ORDER BY created_at DESC LIMIT 1`,
+            [req.username, contentHash]
+        );
+        if (existing.rows.length) {
+            const row = existing.rows[0];
+            if (row.status === 'completed') {
+                logAnalyticsEvent('mika_message_dedup', req.username);
+                return res.json({ requestId: row.id, correlationId: row.correlation_id, status: 'completed', reply: row.reply, cached: true });
+            }
+            if (row.status === 'pending') {
+                return res.status(202).json({ requestId: row.id, correlationId: row.correlation_id, status: 'pending', cached: true });
+            }
+            // status is 'timeout' or 'failed' — fall through and let the admin retry fresh.
         }
 
-        await redisClient.set(idempotencyKey, JSON.stringify({ reply }), { EX: 5 * 60 });
-        res.json({ reply });
+        const id = crypto.randomUUID();
+        const correlationId = crypto.randomBytes(4).toString('hex').toUpperCase();
+        await pgPool.query(
+            `INSERT INTO mika_bridge_requests (id, admin_username, content_hash, correlation_id, message, status)
+             VALUES ($1, $2, $3, $4, $5, 'pending')`,
+            [id, req.username, contentHash, correlationId, message]
+        );
+        logAnalyticsEvent('mika_message_sent', req.username);
+        res.status(202).json({ requestId: id, correlationId, status: 'pending' });
+
+        processMikaRequest({ id, correlationId, message, adminUsername: req.username })
+            .catch(err => console.error(`mika bridge [${correlationId}] unhandled:`, err.message));
     } catch (err) {
-        console.error(`mika/message [${correlationId}] failed:`, err.message);
-        res.status(502).json({ error: 'Could not reach Mika right now. Please try again.' });
+        console.error('mika/message failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+// Lets the admin UI restore request/reply history across refresh/reconnect
+// instead of relying solely on the live Socket.IO push.
+app.get('/api/admin/mika/requests', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+        const result = await pgPool.query(
+            `SELECT id, correlation_id, message, status, reply, error, created_at, updated_at
+             FROM mika_bridge_requests WHERE admin_username = $1 ORDER BY created_at DESC LIMIT $2`,
+            [req.username, limit]
+        );
+        res.json({
+            requests: result.rows.map(r => ({
+                requestId: r.id,
+                correlationId: r.correlation_id,
+                message: r.message,
+                status: r.status,
+                reply: r.reply,
+                error: r.error,
+                createdAt: r.created_at,
+                updatedAt: r.updated_at,
+            })),
+        });
+    } catch (err) {
+        console.error('mika/requests failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
     }
 });
 

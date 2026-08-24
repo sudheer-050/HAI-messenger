@@ -3,7 +3,8 @@
   "version": "1.2.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test *.unit.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
