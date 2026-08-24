@@ -1,16 +1,25 @@
 /**
- * Mika Bridge Security Tests (MYAG-127)
+ * Mika Bridge Security Tests (MYAG-127 contract, MYAG-130 implementation)
  *
- * These are manual/integration test cases for QA to verify before MYAG-126
- * stage 2 (Frontend) is unblocked. Each case documents the exact request and
- * the expected HTTP status + response shape.
+ * These are manual/integration test cases for QA to verify before MYAG-128
+ * (end-to-end verification) is unblocked. Each case documents the exact
+ * request and the expected HTTP status + response shape. Pure-logic coverage
+ * (reply-selection/idempotency-hash correctness) lives in the automated
+ * mika-bridge.unit.test.js instead — these cases need a live stack because
+ * they exercise auth, rate limiting, and the async Multica CLI round trip.
+ *
+ * Note: since MYAG-130, POST /api/admin/mika/message ACKs with 202 + a
+ * requestId immediately; the actual reply arrives later over Socket.IO
+ * ('mika_reply') or via GET /api/admin/mika/requests, not in this response.
  *
  * Prerequisites:
  *   - Stack running (docker compose up)
  *   - At least one admin account (ADMIN_USERNAMES configured in .env)
  *   - A second non-admin account
- *   - Mika bridge env vars NOT set for the "unconfigured" tests; set for the
- *     "configured" tests
+ *   - Mika bridge env vars (MULTICA_PROJECT_ID, MIKA_AGENT_ID,
+ *     MIKA_PARENT_ISSUE_ID) NOT set for the "unconfigured" tests; set for the
+ *     "configured" tests, with the `multica` CLI installed and authenticated
+ *     on the host running the backend
  *
  * Run with: node mika-bridge.security.test.js <base_url> <admin_token> <user_token>
  * or execute each curl command manually.
@@ -60,7 +69,7 @@ const cases = [
     {
         id: 'SEC-5',
         name: 'Mika bridge unconfigured (env vars missing) → 503',
-        note: 'Run with MULTICA_API_TOKEN unset in the environment',
+        note: 'Run with MULTICA_PROJECT_ID/MIKA_AGENT_ID/MIKA_PARENT_ISSUE_ID unset in the environment',
         method: 'POST',
         path: '/api/admin/mika/message',
         headers: { 'Content-Type': 'application/json', Cookie: ADMIN_COOKIE },
@@ -69,20 +78,18 @@ const cases = [
     },
     {
         id: 'SEC-6',
-        name: 'MULTICA_API_TOKEN absent from all response bodies',
-        note: 'Call /api/auth/me, /api/admin/overview, and /api/admin/mika/message; verify token never appears in any response body',
-        method: 'GET',
-        path: '/api/auth/me',
-        headers: { Cookie: ADMIN_COOKIE },
-        expect: {
-            status: 200,
-            bodyMustNotContain: process.env.MULTICA_API_TOKEN || 'multica_token_here',
-        },
+        name: 'Accepted request returns 202 + requestId, never a raw CLI error/credential',
+        note: 'The response must never contain multica CLI stdout/stderr, file paths, or the string "multica_cli_error"',
+        method: 'POST',
+        path: '/api/admin/mika/message',
+        headers: { 'Content-Type': 'application/json', Cookie: ADMIN_COOKIE },
+        body: { message: 'hello mika ' + Date.now() },
+        expect: { status: 202, hasField: 'requestId' },
     },
     {
         id: 'SEC-7',
         name: 'Per-user rate limit (6th request within 10 min) → 429',
-        note: 'Send 6 identical requests as the same admin; the 6th should return 429',
+        note: 'Send 6 distinct-message requests as the same admin; the 6th should return 429',
         method: 'POST',
         path: '/api/admin/mika/message',
         headers: { 'Content-Type': 'application/json', Cookie: ADMIN_COOKIE },
@@ -92,8 +99,8 @@ const cases = [
     },
     {
         id: 'SEC-8',
-        name: 'Idempotency: identical message within 5 min returns cached:true',
-        note: 'Send the same message twice within 5 minutes; second response should include { cached: true }',
+        name: 'Idempotency: identical message within 5 min reuses the same requestId',
+        note: 'Send the same message twice within 5 minutes; second response should carry { cached: true } and the same requestId as the first',
         method: 'POST',
         path: '/api/admin/mika/message',
         headers: { 'Content-Type': 'application/json', Cookie: ADMIN_COOKIE },
@@ -110,8 +117,20 @@ const cases = [
     },
     {
         id: 'SEC-10',
-        name: 'Credentials in .env are not in docker-compose.yml or any committed file',
-        note: 'Manual: run `git grep -r MULTICA_API_TOKEN -- . :!.env.example :!docker-compose.yml` and confirm zero results that contain an actual token value (not a variable placeholder)',
+        name: 'No Multica bearer-token credentials in any committed file',
+        note: 'Manual: run `git grep -rE "MULTICA_API_TOKEN|api\\.multica\\.ai" -- . :!.env.example` and confirm zero results — the CLI-based bridge has no bearer token to leak; only the multica CLI\'s own auth on the host matters',
+        manual: true,
+    },
+    {
+        id: 'SEC-11',
+        name: 'Reply relayed to the admin only came from the trusted Mika agent id on the exact issue created',
+        note: 'Manual: with the bridge configured, confirm in DB (mika_bridge_requests) that a completed row\'s reply text matches the corresponding Multica issue comment, and that a comment posted by a different agent/user on that issue is never surfaced as the reply',
+        manual: true,
+    },
+    {
+        id: 'SEC-12',
+        name: 'Restart recovery: a pending request survives a backend restart',
+        note: 'Manual: send a message, restart the backend before Mika replies, and confirm the request either resumes polling (still within timeout) or is marked timeout — never left stuck as pending forever',
         manual: true,
     },
 ];
@@ -132,8 +151,9 @@ async function runTest(tc) {
         const ok = tc.expect.status ? res.status === tc.expect.status : true;
         const tokenLeak = tc.expect.bodyMustNotContain && body.includes(tc.expect.bodyMustNotContain);
         const errorOk = tc.expect.errorIncludes ? body.toLowerCase().includes(tc.expect.errorIncludes.toLowerCase()) : true;
+        const hasFieldOk = tc.expect.hasField ? (() => { try { return tc.expect.hasField in JSON.parse(body); } catch { return false; } })() : true;
 
-        const pass = ok && !tokenLeak && errorOk;
+        const pass = ok && !tokenLeak && errorOk && hasFieldOk;
         console.log(`[${tc.id}] ${pass ? 'PASS' : 'FAIL'} — ${tc.name}`);
         if (!pass) {
             console.log(`       Expected status ${tc.expect.status}, got ${res.status}`);
