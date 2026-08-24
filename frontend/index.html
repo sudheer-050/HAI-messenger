@@ -15040,7 +15040,7 @@ void main(){
         setTimeout(finishOpen, 700); // animation is 600ms — safety net, not the primary path
     }
 
-    function animateChatClose() {
+    function animateChatClose(onClosed) {
         const chatArea = document.getElementById('chatPanel');
         // Bring the pushed-away rows back into place. This finishes well before the
         // chat-shrink animation below, so the list is fully settled by the time it
@@ -15061,6 +15061,7 @@ void main(){
             chatArea.style.zIndex = '';
             document.body.classList.remove('mobile-chat-open');
             renderSidebarContacts();
+            if (onClosed) onClosed();
             return;
         }
 
@@ -15091,6 +15092,7 @@ void main(){
             chatArea.style.opacity = '';
             chatArea.style.zIndex = '';
             renderSidebarContacts();
+            if (onClosed) onClosed();
         }
         chatArea.addEventListener('transitionend', function handler(e) {
             if (e.propertyName !== 'transform') return;
@@ -15158,7 +15160,7 @@ void main(){
         animateChatOpen(null);
     }
 
-    function exitMobileChatView() {
+    function exitMobileChatView(onClosed) {
         if (currentNearbyMatchId) {
             stopNearbyCountdownInterval();
             currentNearbyMatchId = null;
@@ -15173,9 +15175,10 @@ void main(){
             chatPanel.style.zIndex = '';
             document.body.classList.remove('mobile-chat-open');
             switchSidebarTab('nearby');
+            if (onClosed) onClosed();
             return;
         }
-        animateChatClose();
+        animateChatClose(onClosed);
     }
 
     function showTypingIndicator() {
@@ -16187,7 +16190,13 @@ void main(){
                 return { username, label: profile.displayName || profile.name || username };
             }),
         openChat: username => switchConversationRoom(username),
-        closeChat: () => exitMobileChatView(),
+        closeChat: () => exitMobileChatView(() => {
+            currentActiveUser = '';
+            voiceCurrentMessageId = null;
+            document.getElementById('messages').innerHTML = '';
+            document.getElementById('activeChatTargetDisplay').innerText = 'Select a conversation to start chatting';
+            document.getElementById('chatPanel').classList.add('no-active-chat');
+        }),
         search: query => {
             openUniversalSearch();
             const input = document.getElementById('universalSearchInput');

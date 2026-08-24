@@ -163,3 +163,35 @@ test('invalid setting values never reach confirmation or execution', async () =>
     assert.deepEqual(calls, [], alias);
   }
 });
+
+test('cancel and restart remove stale recognition listeners', async () => {
+  globalThis.document = { hidden: false, addEventListener() {} };
+  globalThis.window = { addEventListener() {} };
+  const calls = [];
+  class Adapter extends EventTarget {
+    constructor() { super(); Adapter.last = this; }
+    ready = true;
+    listening = false;
+    async start() { this.listening = true; }
+    stop() { this.listening = false; }
+  }
+  const controller = createVoiceController({
+    Adapter,
+    elements: elements(),
+    bridge: {
+      getContacts: () => [],
+      getActiveChat: () => null,
+      search: query => calls.push(query),
+    },
+  });
+
+  await controller.start();
+  controller.cancel();
+  await controller.start();
+  const transcript = new Event('transcript');
+  Object.defineProperty(transcript, 'detail', { value: { text: 'search cats' } });
+  Adapter.last.dispatchEvent(transcript);
+
+  assert.deepEqual(calls, ['cats']);
+  assert.equal(controller.state, 'idle');
+});

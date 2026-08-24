@@ -11,6 +11,8 @@ export function resolveContact(name, contacts) {
 
 export function createVoiceController({ bridge, elements, Adapter = STTAdapter, timeoutMs = 15000 }) {
   let adapter, timer, pending;
+  let transcriptListener = null;
+  let errorListener = null;
   let state = 'idle';
   const setState = (next, text = '') => {
     state = next;
@@ -20,7 +22,15 @@ export function createVoiceController({ bridge, elements, Adapter = STTAdapter, 
     elements.mic.setAttribute('aria-pressed', String(next === 'listening'));
     elements.mic.setAttribute('aria-label', next === 'listening' ? 'Stop voice control' : 'Start voice control');
   };
-  const release = () => { clearTimeout(timer); timer = null; adapter?.stop(); };
+  const release = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (adapter && transcriptListener) adapter.removeEventListener?.('transcript', transcriptListener);
+    if (adapter && errorListener) adapter.removeEventListener?.('error', errorListener);
+    transcriptListener = null;
+    errorListener = null;
+    adapter?.stop();
+  };
   const cancel = () => { pending = null; elements.confirm.hidden = true; release(); setState('idle'); };
   const fail = message => { cancel(); setState('error', message); };
   const contact = name => {
@@ -73,8 +83,10 @@ export function createVoiceController({ bridge, elements, Adapter = STTAdapter, 
         setState('downloading', 'Preparing private on-device speech recognition…');
         await adapter.init(p => setState('downloading', p.phase === 'download' ? `Downloading voice model… ${Math.round(p.ratio * 100)}%` : 'Preparing voice model…'));
       }
-      adapter.addEventListener('transcript', onTranscript, { once: true });
-      adapter.addEventListener('error', e => fail(e.detail?.message || 'Voice recognition failed.'), { once: true });
+      transcriptListener = onTranscript;
+      errorListener = e => fail(e.detail?.message || 'Voice recognition failed.');
+      adapter.addEventListener('transcript', transcriptListener, { once: true });
+      adapter.addEventListener('error', errorListener, { once: true });
       await adapter.start();
       if (!adapter.listening) return;
       setState('listening', 'Listening on this device… tap the mic to stop.');
