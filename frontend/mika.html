@@ -207,6 +207,8 @@
         const mikaMessages = document.getElementById('mikaMessages');
         const mikaEmpty = document.getElementById('mikaEmpty');
         const pendingByRequestId = new Map(); // requestId -> { block, statusRow, message }
+        const earlyResultsByRequestId = new Map(); // socket result received before POST acknowledgement
+        const renderedReplyIds = new Set();
 
         function clearEmpty() { if (mikaEmpty.parentNode) mikaEmpty.remove(); }
         function scrollToBottom() { mikaMessages.scrollTop = mikaMessages.scrollHeight; }
@@ -256,9 +258,28 @@
 
         function markStatusCompleted(requestId, reply) {
             const entry = pendingByRequestId.get(requestId);
-            if (entry) entry.statusRow.remove();
+            if (renderedReplyIds.has(requestId)) return;
+            if (!entry) {
+                earlyResultsByRequestId.set(requestId, { status: 'completed', reply });
+                return;
+            }
+            entry.statusRow.remove();
             pendingByRequestId.delete(requestId);
+            renderedReplyIds.add(requestId);
             appendAssistantBubble(reply);
+        }
+
+        function applyEarlyResult(requestId) {
+            const result = earlyResultsByRequestId.get(requestId);
+            if (!result) return false;
+            earlyResultsByRequestId.delete(requestId);
+            if (result.status === 'completed') {
+                markStatusCompleted(requestId, result.reply);
+            } else {
+                const entry = pendingByRequestId.get(requestId);
+                markStatusFailed(requestId, result.error, entry ? entry.message : '');
+            }
+            return true;
         }
 
         function renderHistoryEntry(req) {
@@ -326,11 +347,11 @@
                 // so a later 'mika_reply' socket push can find this row.
                 const entry = pendingByRequestId.get(placeholderId);
                 pendingByRequestId.delete(placeholderId);
-                if (data.status === 'completed' && data.reply) {
-                    if (entry) entry.statusRow.remove();
-                    appendAssistantBubble(data.reply);
-                } else if (entry) {
+                if (entry) {
                     pendingByRequestId.set(data.requestId, entry);
+                }
+                if (!applyEarlyResult(data.requestId) && data.status === 'completed' && data.reply) {
+                    markStatusCompleted(data.requestId, data.reply);
                 }
             } catch (err) {
                 markStatusFailed(placeholderId, err.message || 'Could not reach Mika right now.', text);
@@ -353,7 +374,9 @@
                     markStatusCompleted(payload.requestId, payload.reply);
                 } else {
                     const entry = pendingByRequestId.get(payload.requestId);
-                    markStatusFailed(payload.requestId, payload.error || 'Could not reach Mika right now.', entry ? entry.message : '');
+                    const error = payload.error || 'Could not reach Mika right now.';
+                    if (entry) markStatusFailed(payload.requestId, error, entry.message);
+                    else earlyResultsByRequestId.set(payload.requestId, { status: 'failed', error });
                 }
             });
         }
