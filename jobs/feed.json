@@ -1,5 +1,88 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-08-22T00:00:00Z",
-  "jobs": []
+  "generated_at": "2026-08-24T13:59:19Z",
+  "jobs": [
+    {
+      "source_issue_id": "01a02aa6-f0ad-7878-9db6-d05377f761e1",
+      "source_issue_key": "MYAG-108",
+      "source_status": "in_review",
+      "title": "Business Analyst (Remote)",
+      "company": "Vaya Health",
+      "salary": "$68,000–$88,000",
+      "location": "Remote — must reside in NC, SC, GA, TN, VA, MD, or FL",
+      "work_arrangement": "Remote",
+      "employment_type": "Full-time",
+      "description": "The primary purpose of this role is to analyze the current state of the organization's operations and processes, identify needs and opportunities, develop strategies, and maximize those opportunities. The Business Analyst will work collaboratively across all departments and communicate solutions and strategies clearly to stakeholders, facilitators, and partners. Responsibilities include root-cause and gap analysis to recommend and drive change, and acting as an efficient advisor/partner between technology, support, and business units.\n\nRequirements: High School diploma or GED required; Bachelor's degree in Human Services, Business Administration, Public Administration, or Computer Information Systems preferred; 2 years of Business Analyst experience required.\n\nApplication deadline: open until filled. Confirmed currently accepting applications at time of this search via Vaya Health's Career Center.\n\nCaveat: this role requires residency in NC, SC, GA, TN, VA, MD, or FL. Confirm eligibility before applying.",
+      "apply_url": "https://www.vayahealth.com/about/careers/",
+      "tailored_resume": "SUDHEER KUMAR GANDIBOYANA\nChicago, IL 60660 | +1 773-433-6054 | gsudheer56@gmail.com | linkedin.com/in/sudheergsk | github.com/sudheer-050\n\nSUMMARY\nBusiness analytics professional with 2+ years of experience in root-cause and gap analysis, process improvement, and cross-functional stakeholder communication, currently pursuing a Master of Science in Business Analytics at DePaul University (GPA 3.925). Skilled at analyzing current-state operations, identifying needs and opportunities, and developing and driving strategies for change — from redesigning production filtration workflows (improving productivity by 7%) to building predictive/reporting pipelines that improved customer retention and operational efficiency by up to 10%. Proven advisor and partner between technical and business units, translating stakeholder needs into measurable outcomes.\n\nSKILLS\nAnalytical: Root-Cause & Gap Analysis, Process Improvement, Business Analysis, Data Analysis & Reporting, KPI Design & Tracking, Forecasting\nTechnical: Python, SQL, R, Power BI, Tableau, Microsoft Excel/Office\nProfessional: Stakeholder Communication, Cross-functional Collaboration, Team Leadership & Training, Project Management, Change Management/Adoption\n\nEXPERIENCE\n\nData Analytics Intern — Unified Mentor (Mar 2024 – Jun 2024)\n- Analyzed 100K+ Amazon sales transactions using Power BI and R to identify regional trends and gaps, recommending targeted strategies that drove a 10% increase in customer-segment sales.\n- Partnered with non-technical stakeholders to translate business questions and needs into measurable KPIs and self-service reports, acting as an advisor between business and technical teams.\n- Built predictive HR attrition segmentation models in Tableau, identifying at-risk groups and driving strategies that improved retention by 10%.\n- Defined data cleaning rules and standardized regional mappings, identifying process gaps and improving reporting accuracy and consistency.\n\nJunior Engineer — Hetero Labs Limited, Unit-IX (Feb 2021 – Jul 2023)\n- Conducted root-cause analysis on yield-loss drivers and defect patterns across production batches, recommending and driving process changes.\n- Analyzed historical production data to identify operational gaps and redesign filtration workflows, driving adoption of an Automatic Vertical Filter Press (AVPF) that reduced cycle time from 8 hours to 45 minutes and improved productivity by 7%.\n- Acted as liaison between plant leadership and IT, aligning data collection processes with compliance and safety requirements as an advisor/partner across technical and business units.\n- Led adoption of new methodologies and trained 8 team members, driving organizational change and increasing execution speed by 50%.\n- Developed and delivered training materials to 25+ employees, achieving 100% compliance and reducing safety incidents by 30%.\n\nPROJECTS\nAuto Data Analyst (ongoing, github.com/sudheer-050/auto-data-analyst): Built an automated data-analysis platform that identifies data gaps and issues, auto-generates recommendations, and includes a guided, editable analysis pipeline for non-technical users.\n\nEDUCATION\nMaster of Science, Business Analytics — DePaul University, Kellstadt Graduate School of Business (Sep 2024 – Aug 2026), GPA 3.925. Relevant coursework: Business Performance Analysis (10-K Analysis), Decision Making for Managers, Project Management, Tools & Techniques for Data Analysis.\nBachelor of Technology, Chemical Engineering — Rajiv Gandhi University of Knowledge Technologies (Aug 2016 – Oct 2020).\n\nCERTIFICATIONS\nBusiness Analysis Foundations — LinkedIn Learning (2024)\nCareer Essentials in Data Analysis — Microsoft & LinkedIn Learning (2024)",
+      "ats_score": 85,
+      "ats_breakdown": {
+        "skills_match": 85,
+        "experience_match": 80,
+        "education_match": 75,
+        "keywords_found": [
+          "root-cause analysis",
+          "gap analysis",
+          "process improvement",
+          "stakeholder communication",
+          "cross-functional collaboration",
+          "business analysis",
+          "KPI"
+        ],
+        "keywords_missing": [
+          "Business Administration degree",
+          "Public Administration degree",
+          "formal Business Analyst job title"
+        ],
+        "notes": "Strong operational/analytical experience match on root-cause analysis, gap analysis, and cross-functional advisory work. Degree field (Chemical Engineering / Business Analytics in progress) is related but not an exact match to the preferred field. Role requires residency in NC, SC, GA, TN, VA, MD, or FL — candidate is based in Chicago, IL; confirm eligibility before applying."
+      },
+      "created_at": "2026-08-24T13:59:19Z",
+      "updated_at": "2026-08-24T13:59:19Z"
+    },
+    {
+      "source_issue_id": "01a02aa6-ecac-7612-aa5d-0165c2c81bcd",
+      "source_issue_key": "MYAG-106",
+      "source_status": "in_review",
+      "title": "Machine Learning Engineer",
+      "company": "CoVar",
+      "salary": "Not disclosed",
+      "location": "Durham, NC",
+      "work_arrangement": "Hybrid",
+      "employment_type": "Full-time",
+      "description": "Develop software and machine learning algorithms to solve real-world customer problems: work with data, develop algorithms, evaluate results, and write the production code that goes onto real-world systems. Opportunities to publish novel work in both classified and unclassified settings.\n\nQualifications: Python and associated numerical/analytics packages (NumPy, Pandas, etc.); Git; PyTorch or TensorFlow. Machine learning fundamentals; deep knowledge of computer vision (preferred), NLP, classical ML, or Bayesian models. Bachelor's degree required (Master's or PhD preferred) in engineering, math, computer science, or related field. Excellent technical communication skills. Bonus: DoD project experience, active US security clearance.\n\nCaveat: this posting requires US citizenship for security-clearance eligibility and willingness to relocate to/work on-site in Durham, NC (hybrid, 3+ days/week). Confirm citizenship and relocation fit before applying.",
+      "apply_url": "https://job-boards.greenhouse.io/covar/jobs/5097883007",
+      "tailored_resume": "SUDHEER KUMAR GANDIBOYANA\nChicago, IL 60660 | +1 773-433-6054 | gsudheer56@gmail.com | linkedin.com/in/sudheergsk | github.com/sudheer-050\n\nSUMMARY\nMachine learning engineer with a Bachelor's degree in Engineering and hands-on classical ML experience, currently pursuing a Master of Science in Business Analytics at DePaul University (GPA 3.925). Proficient in Python (NumPy, Pandas, scikit-learn) and Git-based version control, with experience developing algorithms, evaluating results, and writing production code across 15+ classical ML models (XGBoost, LightGBM, CatBoost), including cross-validated evaluation and ensembling. Strong technical communicator with a track record of translating complex analysis into stakeholder-ready reporting and training/mentoring team members.\n\nSKILLS\nTechnical: Python (NumPy, Pandas, scikit-learn), Git, SQL, R, Machine Learning, Classical ML (XGBoost, LightGBM, CatBoost), AWS (cloud fundamentals), Power BI, Tableau\nAnalytical: Predictive Modeling, Cross-Validated Model Evaluation, Ensembling, Statistical Analysis, Data Visualization & Reporting\nProfessional: Technical Communication, Cross-functional Collaboration, Team Training & Mentorship, Project Management\nFoundational: Linear Algebra, Statistics, Probability, Calculus\n\nEXPERIENCE\n\nData Analytics Intern — Unified Mentor (Mar 2024 – Jun 2024)\n- Used Python (NumPy, Pandas) and SQL to clean, validate, and manipulate datasets exceeding 1M records.\n- Built predictive HR attrition segmentation models in Tableau, enabling targeted retention interventions that improved retention by 10%.\n- Analyzed 100K+ Amazon sales transactions using Power BI and R to identify regional trends, driving a 10% increase in targeted customer-segment sales.\n- Partnered with non-technical stakeholders to translate business questions into measurable KPIs and self-service reports.\n\nJunior Engineer — Hetero Labs Limited, Unit-IX (Feb 2021 – Jul 2023)\n- Analyzed test and defect data on production batches to identify failure patterns, recommending process changes.\n- Reduced filtration cycle time from 8 hours to 45 minutes by introducing an Automatic Vertical Filter Press (AVPF), improving productivity by 7%.\n- Trained 8 team members on new methodologies, increasing team competency and execution speed by 50%.\n\nPROJECTS\nAuto Data Analyst (ongoing, github.com/sudheer-050/auto-data-analyst): Developed algorithms, evaluated results, and wrote production code for an end-to-end automated ML pipeline (Flask/pandas/scikit-learn) that auto-cleans uploaded CSVs, runs EDA, and trains/compares 15+ classical ML models (XGBoost, LightGBM, CatBoost) with cross-validated metrics, ensembling, and threshold tuning; includes a guided editable pipeline and a rule-based Q&A chat over results, plus multi-dataset joining with automatic column-match detection.\nPersonal AI Agent/Chatbot (ongoing): Built a personal AI agent for decision-support, with ongoing work on text-to-speech/emotion-aware voice features.\nDating-Website Application (DePaul course project, 2025): Built AI-driven matching logic as part of a team project.\n\nEDUCATION\nBachelor of Technology, Chemical Engineering — Rajiv Gandhi University of Knowledge Technologies (Aug 2016 – Oct 2020).\nMaster of Science, Business Analytics (in progress) — DePaul University, Kellstadt Graduate School of Business (Sep 2024 – Aug 2026), GPA 3.925. Relevant coursework: Machine Learning for Managers, Database Management Systems (SQL), Tools & Techniques for Data Analysis.\n\nCERTIFICATIONS\nBusiness Analysis Foundations — LinkedIn Learning (2024)\nCareer Essentials in Data Analysis — Microsoft & LinkedIn Learning (2024)",
+      "ats_score": 83,
+      "ats_breakdown": {
+        "skills_match": 85,
+        "experience_match": 80,
+        "education_match": 85,
+        "keywords_found": [
+          "Python",
+          "NumPy",
+          "Pandas",
+          "Git",
+          "machine learning fundamentals",
+          "classical ML",
+          "XGBoost",
+          "LightGBM",
+          "CatBoost",
+          "cross-validation",
+          "Bachelor's degree in engineering"
+        ],
+        "keywords_missing": [
+          "PyTorch",
+          "TensorFlow",
+          "computer vision",
+          "NLP",
+          "Bayesian models",
+          "DoD project experience",
+          "active US security clearance"
+        ],
+        "notes": "Strong Python / classical ML match (XGBoost, LightGBM, CatBoost, cross-validation); no deep-learning framework (PyTorch/TensorFlow) experience — genuine gap, not fabricated. Role requires US citizenship for security-clearance eligibility and on-site/hybrid work in Durham, NC (3+ days/week) — confirm citizenship and relocation fit before applying."
+      },
+      "created_at": "2026-08-24T13:59:19Z",
+      "updated_at": "2026-08-24T13:59:19Z"
+    }
+  ]
 }
