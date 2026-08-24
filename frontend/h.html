@@ -298,15 +298,15 @@
             renderHistoryPanel();
         }
 
-        async function askH(message) {
+        async function askH(message, { voice = false } = {}) {
             const res = await fetch('/api/h-chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message, history: hHistory, glossary: loadGlossary() }),
+                body: JSON.stringify({ message, history: hHistory, glossary: loadGlossary(), voice }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Something went wrong.');
-            return { reply: data.reply, emotion: data.emotion || 'neutral' };
+            return { reply: data.reply, emotion: data.emotion || 'neutral', audio: data.audio || null };
         }
 
         /* ============ MODE SWITCHING ============ */
@@ -330,25 +330,34 @@
                 startVoiceConversation(); // auto-starts -- no separate mic button
             }
         }
-        // Mobile browsers (iOS Safari, many Android WebViews) only allow
-        // speechSynthesis.speak() to produce audio if the very first call in the
-        // page's lifetime happens synchronously inside a user gesture (a tap
-        // handler, not an async callback after it). H's actual replies are always
-        // spoken later, after an await'd fetch -- too late to count as "the
-        // gesture" -- so fire one silent, zero-volume utterance right here, still
-        // inside the tap, purely to unlock audio for every speak() call after it.
-        let speechUnlocked = false;
-        function unlockSpeechSynthesisForMobile() {
-            if (speechUnlocked) return;
-            speechUnlocked = true;
-            try {
-                const unlock = new SpeechSynthesisUtterance(' ');
-                unlock.volume = 0;
-                window.speechSynthesis.speak(unlock);
-            } catch (e) {}
+        // Reuse one media element for every turn. Starting it synchronously from
+        // the Voice tap unlocks later Kokoro playback on mobile browsers, where
+        // the real MP3 only arrives after an asynchronous request.
+        const hVoiceAudio = new Audio();
+        hVoiceAudio.preload = 'auto';
+        hVoiceAudio.playsInline = true;
+        let audioUnlocked = false;
+        const SILENT_WAV = 'data:audio/wav;base64,UklGRioAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQYAAACAgICAgA==';
+
+        function unlockAudioForMobile() {
+            if (audioUnlocked) return;
+            audioUnlocked = true;
+            hVoiceAudio.volume = 0;
+            hVoiceAudio.src = SILENT_WAV;
+            const playAttempt = hVoiceAudio.play();
+            if (playAttempt) playAttempt.then(() => {
+                // A very fast response may already have replaced the silent
+                // source with Kokoro audio; never tear that playback down.
+                if (!hVoiceAudio.src.startsWith('data:audio/wav')) return;
+                hVoiceAudio.pause();
+                hVoiceAudio.currentTime = 0;
+                hVoiceAudio.removeAttribute('src');
+                hVoiceAudio.load();
+                hVoiceAudio.volume = 1;
+            }).catch(() => { hVoiceAudio.volume = 1; });
         }
         textModeBtn.addEventListener('click', () => switchMode('text'));
-        voiceModeBtn.addEventListener('click', () => { unlockSpeechSynthesisForMobile(); switchMode('voice'); });
+        voiceModeBtn.addEventListener('click', () => { unlockAudioForMobile(); switchMode('voice'); });
 
         /* ============ TEXT MODE ============ */
         const textMessages = document.getElementById('textMessages');
@@ -454,74 +463,55 @@
 
         function setVoiceStatus(text) { voiceStatus.textContent = text; }
 
-        // Resolved ONCE and cached -- a single, consistent voice for the whole
-        // session, never re-picked mid-conversation.
-        let preferredVoiceCache = null;
-        let voicesReadyPromise = null;
-        // getVoices() returns [] until the browser finishes loading its voice list
-        // asynchronously; speaking before that resolves falls back to the OS default
-        // voice (often male on Windows) for just the first utterance, then the real
-        // pick kicks in from the second one on -- audibly a voice switch mid-conversation.
-        // Waiting here means the very first thing spoken already uses the locked-in voice.
-        function ensureVoicesLoaded() {
-            if (voicesReadyPromise) return voicesReadyPromise;
-            voicesReadyPromise = new Promise(resolve => {
-                const existing = window.speechSynthesis.getVoices();
-                if (existing.length) { resolve(existing); return; }
-                window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
-                setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
-            });
-            return voicesReadyPromise;
-        }
-
-        function getPreferredVoice(voices) {
-            if (preferredVoiceCache) return preferredVoiceCache;
-            if (!voices || !voices.length) return null;
-            // Use whatever the platform itself marks as its default TTS voice --
-            // this is literally Siri's voice on iOS Safari, or the native Google
-            // voice on Android Chrome, rather than us guessing at a specific named
-            // voice and risking a robotic-sounding pick.
-            const enVoices = voices.filter(v => /^en/i.test(v.lang));
-            const match = voices.find(v => v.default) || enVoices[0] || voices[0] || null;
-            preferredVoiceCache = match;
-            return preferredVoiceCache;
-        }
-
+        let activeVoiceObjectUrl = null;
+        let audioPlaybackToken = 0;
         function stopSpeaking() {
-            window.speechSynthesis.cancel();
+            audioPlaybackToken++;
+            hVoiceAudio.onended = null;
+            hVoiceAudio.onerror = null;
+            hVoiceAudio.pause();
+            hVoiceAudio.removeAttribute('src');
+            hVoiceAudio.load();
+            if (activeVoiceObjectUrl) URL.revokeObjectURL(activeVoiceObjectUrl);
+            activeVoiceObjectUrl = null;
         }
 
-        // Native speechSynthesis can't carry real tone, but pitch/rate is real
-        // and audible -- H's backend tags each reply with the emotion it's
-        // actually going for (see H_SYSTEM_PROMPT/H_EMOTIONS in server.js), and
-        // this maps that tag onto delivery so the same flat voice engine still
-        // sounds warmer for good news, softer for sad news, quicker when excited,
-        // instead of every reply landing at the identical flat pace.
-        const EMOTION_VOICE_PROFILES = {
-            happy:     { pitch: 1.12, rate: 1.05 },
-            excited:   { pitch: 1.22, rate: 1.14 },
-            calm:      { pitch: 0.94, rate: 0.92 },
-            curious:   { pitch: 1.08, rate: 0.98 },
-            concerned: { pitch: 0.92, rate: 0.90 },
-            sad:       { pitch: 0.86, rate: 0.86 },
-            neutral:   { pitch: 1,    rate: 1 },
-        };
+        function kokoroAudioBlob(audio) {
+            if (!audio || typeof audio.data !== 'string' || !audio.data) return null;
+            const binary = atob(audio.data);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            const claimedType = audio.mimeType || audio.contentType;
+            const mimeType = typeof claimedType === 'string' && claimedType.startsWith('audio/')
+                ? claimedType
+                : 'audio/mpeg';
+            return new Blob([bytes], { type: mimeType });
+        }
 
-        function speak(text, onEnd, emotion) {
-            window.speechSynthesis.cancel();
-            const profile = EMOTION_VOICE_PROFILES[emotion] || EMOTION_VOICE_PROFILES.neutral;
-            ensureVoicesLoaded().then(voices => {
-                const utterance = new SpeechSynthesisUtterance(text);
-                const voice = getPreferredVoice(voices);
-                if (voice) utterance.voice = voice;
-                utterance.pitch = profile.pitch;
-                utterance.rate = profile.rate;
-                let ended = false;
-                const finish = () => { if (ended) return; ended = true; onEnd(); };
-                utterance.onend = finish;
-                utterance.onerror = finish;
-                window.speechSynthesis.speak(utterance);
-            });
+        function speak(audio, onEnd) {
+            stopSpeaking();
+            const playbackToken = audioPlaybackToken;
+            let blob;
+            try { blob = kokoroAudioBlob(audio); } catch (e) { blob = null; }
+            if (!blob) { onEnd(false); return; }
+
+            activeVoiceObjectUrl = URL.createObjectURL(blob);
+            let ended = false;
+            const finish = (played) => {
+                if (ended || playbackToken !== audioPlaybackToken) return;
+                ended = true;
+                hVoiceAudio.onended = null;
+                hVoiceAudio.onerror = null;
+                if (activeVoiceObjectUrl) URL.revokeObjectURL(activeVoiceObjectUrl);
+                activeVoiceObjectUrl = null;
+                onEnd(played);
+            };
+            hVoiceAudio.onended = () => finish(true);
+            hVoiceAudio.onerror = () => finish(false);
+            hVoiceAudio.volume = 1;
+            hVoiceAudio.src = activeVoiceObjectUrl;
+            const playAttempt = hVoiceAudio.play();
+            if (playAttempt) playAttempt.catch(() => finish(false));
         }
 
         function stopAnyRecognition() {
@@ -576,27 +566,27 @@
         async function handleVoiceTurn(text, myToken) {
             setVoiceStatus('H is thinking…');
             try {
-                const { reply, emotion } = await askH(text);
+                const { reply, audio } = await askH(text, { voice: true });
                 if (myToken !== voiceTurnToken || !voiceConversationActive) return; // a newer turn superseded this one
                 recordTranscript('user', text);
                 recordTranscript('assistant', reply);
 
                 const match = reply.match(LEARN_PATTERN);
-                const spokenText = match ? reply : reply; // speak the full sentence either way, it reads naturally aloud
                 voiceTranscript.textContent = reply;
                 setVoiceStatus('H is speaking…');
                 isHSpeaking = true;
                 orbSpeedMultiplier = 2;
-                speak(spokenText, () => {
+                speak(audio, (played) => {
                     isHSpeaking = false;
                     orbSpeedMultiplier = 1;
                     if (myToken !== voiceTurnToken || !voiceConversationActive) return;
+                    if (!played) setVoiceStatus('Voice audio is unavailable — continuing in text.');
                     if (match) {
                         setVoiceStatus('Switch to Text mode to teach H that word, or just keep talking.');
                     }
                     voiceTranscript.textContent = '';
                     startVoiceListenCycle();
-                }, emotion);
+                });
             } catch (err) {
                 if (myToken !== voiceTurnToken || !voiceConversationActive) return;
                 setVoiceStatus("Couldn't reach H -- trying again shortly.");
