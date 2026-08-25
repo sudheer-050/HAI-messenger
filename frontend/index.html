@@ -1629,28 +1629,30 @@
             transform: none;
             box-shadow: none;
         }
-        /* Glass bubbles -- translucent + blurred rather than a flat fill, so the
-           watermark birds (and the chat bubble's own moving gradient) actually show
-           through the message bubbles themselves, not just the gaps between them.
-           backdrop-filter samples whatever's rendered behind the bubble regardless
-           of DOM nesting, so this picks up the watermark layer (z-index:-1 sibling
-           of #messages) correctly without any extra wiring. */
+        /* Glass bubbles -- tinted + a light specular highlight, in the same material
+           language as the Status FAB reference, but deliberately WITHOUT
+           backdrop-filter: this class repeats for every message in a long scroll
+           list, and stacking a blurred compositing layer per-bubble is exactly the
+           kind of overapplication that tanks scroll performance. The tint/border/
+           inset-highlight trio reads as "glass" without the blur cost; the
+           watermark birds (and the chat bubble's own moving gradient) still show
+           through since the bubble fill itself stays translucent. */
         .msg-row.user .msg {
             background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
             border: 1px solid rgba(255, 255, 255, 0.22);
             color: #fff;
             border-bottom-right-radius: var(--bubble-radius-tail);
-            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.35);
         }
         .msg-row.user .msg:hover {
-            box-shadow: 0 5px 16px rgba(79, 70, 229, 0.45);
+            box-shadow: 0 5px 16px rgba(79, 70, 229, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.35);
         }
         .msg-row.other .msg {
             background: rgba(255, 255, 255, 0.88);
             border: 1px solid rgba(0, 0, 0, 0.06);
             color: var(--text-normal);
             border-bottom-left-radius: var(--bubble-radius-tail);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.6);
         }
         :root[data-theme="dark"] .msg-row.user .msg {
             background: linear-gradient(135deg, #4338CA 0%, #6D28D9 100%);
@@ -1658,6 +1660,7 @@
         :root[data-theme="dark"] .msg-row.other .msg {
             background: rgba(255, 255, 255, 0.09);
             border-color: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.1);
         }
         .msg.starred {
             border: 1px solid var(--accent-gold);
@@ -1754,6 +1757,7 @@
             border-radius: 10px;
             margin-top: 4px;
             border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08);
         }
         .msg-file-card .icon { width: 22px; height: 22px; color: var(--text-muted); }
 
@@ -2467,15 +2471,20 @@
             width: 100%;
             max-width: 340px;
             margin: 12px auto;
-            background: var(--bg-sidebar);
-            border: 1px solid var(--border-color);
+            background: var(--glass-strong);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
             border-radius: 16px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15), inset 0 1px 1px rgba(255, 255, 255, 0.5);
             padding: 16px;
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
             gap: 12px;
+        }
+        :root[data-theme="dark"] .inline-game-card {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255, 255, 255, 0.08);
         }
         /* On desktop/laptop-sized viewports, games float as a centered overlay
            over the chat instead of sitting inline in the message scroll -- with
@@ -2662,9 +2671,10 @@
         /* Would You Rather */
         .wyr-options { display: flex; flex-direction: column; gap: 8px; }
         .wyr-option-btn, .wyr-option-card {
-            padding: 14px; border-radius: 12px; border: 1px solid var(--border-color);
-            background: var(--input-bg); color: var(--text-normal); font-family: var(--font-stack);
+            padding: 14px; border-radius: 12px; border: 1px solid var(--glass-border);
+            background: var(--glass-weak); color: var(--text-normal); font-family: var(--font-stack);
             font-size: 13.5px; text-align: center; cursor: pointer; line-height: 1.4;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
         }
         .wyr-option-btn:hover { background: var(--game-accent); color: #fff; }
         .wyr-option-card p { margin: 0; }
@@ -2864,10 +2874,11 @@
         }
 
         .interest-card {
-            background: rgba(0, 0, 0, 0.02);
-            border: 1px solid var(--border-color);
+            background: var(--glass-weak);
+            border: 1px solid var(--glass-border);
             border-radius: 12px;
             padding: 10px 12px;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
             transition: all 0.2s ease;
         }
 
