@@ -698,6 +698,103 @@
             white-space: nowrap;
         }
 
+        /* MIKA BRIDGE — admin-only chat panel (see the state comment near
+           currentMikaMode). Same "borrow the normal chat furniture, hide what doesn't
+           apply" approach as .nearby-mode: no attach/emoji/header-menu, no friend gate,
+           its own advisory banner instead of the ephemeral one. */
+        .chat-area.mika-mode .chat-header-actions,
+        .chat-area.mika-mode #attachToggleBtn,
+        .chat-area.mika-mode .emoji-toggle-btn { display: none; }
+        .chat-area.mika-mode > .friend-gate-banner,
+        .chat-area.mika-mode > .scroll-to-bottom-btn { display: none !important; }
+        .mika-advisory-banner {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            background: rgba(124, 92, 255, 0.12);
+            border-bottom: 1px solid rgba(124, 92, 255, 0.28);
+            font-size: 11px;
+            color: var(--accent-brand);
+            font-weight: 600;
+            flex-shrink: 0;
+            letter-spacing: 0.01em;
+        }
+        :root[data-theme="dark"] .mika-advisory-banner {
+            background: rgba(124, 92, 255, 0.08);
+            border-bottom-color: rgba(124, 92, 255, 0.22);
+        }
+        .chat-area.mika-mode .mika-advisory-banner { display: flex; }
+        .mika-avatar {
+            background: linear-gradient(135deg, var(--accent-brand), #7c5cff);
+            color: #fff;
+        }
+        .mika-admin-tag {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: var(--accent-brand);
+            background: rgba(124, 92, 255, 0.14);
+            border-radius: 4px;
+            padding: 1px 5px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+        .mika-pending-dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--accent-gold);
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+        .mika-reply-bubble.mika-status-pending {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+        .mika-status-spinner {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid var(--text-muted);
+            border-top-color: transparent;
+            animation: mikaSpin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes mikaSpin { to { transform: rotate(360deg); } }
+        .mika-reply-bubble.mika-status-error {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            color: var(--accent-red);
+        }
+        .mika-run-caption {
+            margin-top: 4px;
+            font-size: 10px;
+            color: var(--text-muted);
+            opacity: 0.8;
+        }
+        .mika-retry-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+            background: transparent;
+            border-radius: 12px;
+            padding: 3px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .mika-retry-btn .icon { width: 12px; height: 12px; }
+
         /* IN-PANEL AUX VIEWS (Profile/Trash/Settings) — hidden by default; when one is
            active, aux-mode hides the normal chat furniture and the matching view shows,
            reusing the same open/close plumbing (animateChatOpen/Close, mobile-chat-open)
@@ -3939,6 +4036,13 @@
             <span class="nearby-ephemeral-banner-countdown" id="nearbyBannerCountdown"></span>
         </div>
 
+        <!-- MIKA BRIDGE advisory — each send opens a tracked, auditable Multica issue/run
+             and is answered later, not a live continuous conversation (UC per MYAG-129). -->
+        <div class="mika-advisory-banner" id="mikaAdvisoryBanner">
+            <span data-icon="sparkle"></span>
+            <span>Admin only &mdash; each message opens a tracked Multica run, not a live chat. Replies usually take under 2 minutes.</span>
+        </div>
+
         <div class="pinned-msg-banner" id="pinnedMessageBanner" style="display: none;">
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="display: inline-flex; align-items: center; gap: 4px;"><span data-icon="pin"></span> Pinned:</span>
@@ -4653,6 +4757,18 @@
     let nearbyCountdownInterval = null; // interval that keeps the banner/header countdown live
     let myGeoLocation = null; // {lat, lng, obtainedAt} — only ever sent to the server, never to other clients
     let activeAuxPanel = null; // 'profile' | 'trash' | 'settings' | null — which in-panel aux view (if any) is showing
+
+    // MIKA BRIDGE (MYAG-129/130) — admin-only chat with the Multica agent Mika, kept
+    // entirely separate from conversationHistory (same principle as Nearby above):
+    // it is never a key inside conversationHistory, never persisted to localStorage/
+    // IndexedDB, and never touches the search/favorites/archive/lock code paths that
+    // iterate conversationHistory — so a non-admin session has zero surface where it
+    // could leak, and there's nothing here for search or cached data to find even if
+    // isAdmin were ever wrong. History is refetched fresh from the authorized
+    // GET /api/admin/mika/requests every session instead.
+    let mikaRequests = []; // [{ requestId, correlationId, message, status, reply, error, createdAt }], newest first
+    let currentMikaMode = false; // mutually exclusive with currentActiveUser / currentNearbyMatchId
+    let mikaHasUnseenReply = false; // true when a reply/failure landed while the Mika chat wasn't open
     // LIVE PROFILE FETCHING — profile data lives only on-device (see profileStoreCache),
     // so seeing someone else's profile means asking their client for it live over the
     // socket (see request_profile/profile_requested/submit_profile_response/profile_response
@@ -6786,7 +6902,8 @@
         rpsPaper: '<rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/>',
         rpsScissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="13.47" y1="14.47" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>',
         play: '<polygon points="5 3 19 12 5 21 5 3"/>',
-        pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
+        pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>',
+        retry: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'
     };
     function icon(name, extraClass) {
         return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -9528,6 +9645,11 @@ void main(){
                 isAdmin = !!me.isAdmin;
                 const btn = document.getElementById('hamburgerAdminBtn');
                 if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
+                // Mika's sidebar row is built inside renderSidebarContacts() gated on
+                // isAdmin, which was almost certainly already called before this async
+                // check resolved — re-render now so it appears without needing a reload,
+                // and pull the admin's own request history from the authorized endpoint.
+                if (isAdmin) { renderSidebarContacts(); loadMikaRequests(); }
             }).catch(() => {});
 
             await loadProfileStore();
@@ -9668,6 +9790,29 @@ void main(){
                 } catch (err) {
                     saveAndRenderIncomingMessage(data.id, data.sender, "[🚨 Private Key Mismatch: Cipher Unreadable]", data.encryptedMessage, null, null);
                 }
+            });
+
+            // Mika's async reply/timeout/failure — pushed only to this admin's own
+            // registered sockets (server.js pushToUserSocket), never broadcast, and only
+            // ever received at all if the server's own requireAuth+requireAdmin check on
+            // the original POST passed. Reconciles onto the matching mikaRequests entry
+            // by requestId (falling back to correlationId in case the ack raced this
+            // push) rather than assuming order.
+            socket.on('mika_reply', ({ requestId, correlationId, status, reply, error }) => {
+                let entry = mikaRequests.find(r => r.requestId === requestId || (correlationId && r.correlationId === correlationId));
+                if (!entry) {
+                    entry = { requestId, correlationId: correlationId || '', message: '', status, reply: reply || null, error: error || null, createdAt: Date.now() };
+                    mikaRequests.unshift(entry);
+                } else {
+                    entry.requestId = requestId;
+                    if (correlationId) entry.correlationId = correlationId;
+                    entry.status = status;
+                    entry.reply = reply || null;
+                    entry.error = error || null;
+                }
+                if (!currentMikaMode) mikaHasUnseenReply = true;
+                renderSidebarContacts();
+                if (currentMikaMode) renderMikaChatMessages();
             });
 
             // A friend deleted one of their own Status updates -- drop it from our
@@ -10160,6 +10305,13 @@ void main(){
             socket.disconnect();
         }
         myUsername = ""; myKeyPair = null; myDeviceId = ""; myExportedPublicKeyString = ""; conversationHistory = {}; trashHistory = []; currentActiveUser = ""; unreadChats = []; unreadNotifications = {}; recentlyNotifiedUsers = new Set(); pendingReplyId = null;
+        // Admin state must never survive a logout in memory — a subsequent non-admin
+        // login in the same tab, before the next /api/auth/me resolves, must not still
+        // see the Admin Dashboard entry or any leftover Mika history/UI.
+        isAdmin = false; mikaRequests = []; currentMikaMode = false; mikaHasUnseenReply = false;
+        const adminBtn = document.getElementById('hamburgerAdminBtn');
+        if (adminBtn) adminBtn.style.display = 'none';
+        document.getElementById('chatPanel').classList.remove('mika-mode');
         document.getElementById('messages').innerHTML = "";
         document.getElementById('identityInput').value = "";
         document.getElementById('passwordInput').value = "";
@@ -12708,6 +12860,40 @@ void main(){
         container.innerHTML = "";
         const userAccounts = profileStoreCache;
 
+        // MIKA — pinned above everything else, admin-only, never part of
+        // conversationHistory (see the state comment near currentMikaMode). Built here
+        // rather than via the eligibleUsernames pipeline below so it never touches
+        // search/favorites/archive/lock filtering, swipe-to-delete/favorite, or any
+        // other conversationHistory-keyed logic — those paths simply never see it.
+        if (isAdmin && contactFilterMode === 'all') {
+            const mikaDiv = document.createElement('div');
+            mikaDiv.className = 'contact-item mika-contact-item';
+            if (currentMikaMode) mikaDiv.classList.add('active');
+
+            const latest = mikaRequests[0];
+            let preview = 'Chat with Mika, your Multica assistant';
+            if (latest) {
+                if (latest.status === 'pending') preview = 'Mika is thinking…';
+                else if (latest.status === 'completed') preview = (latest.reply || '').replace(/\s+/g, ' ').trim();
+                else if (latest.status === 'timeout') preview = "Didn't respond in time — tap to retry";
+                else preview = 'Could not reach Mika — tap to retry';
+            }
+            const showUnseenDot = mikaHasUnseenReply || mikaRequests.some(r => r.status === 'pending');
+
+            mikaDiv.innerHTML = `
+                <div class="contact-item-content">
+                    <div class="contact-item-avatar mika-avatar">${icon('sparkle')}</div>
+                    <div class="contact-item-body">
+                        <div class="contact-item-top">
+                            <span class="contact-item-name">Mika<span class="mika-admin-tag">Admin only</span></span>
+                        </div>
+                        <div class="contact-item-preview">${escapeSearchHtml(preview.slice(0, 60))}${showUnseenDot ? '<span class="mika-pending-dot"></span>' : ''}</div>
+                    </div>
+                </div>`;
+            mikaDiv.querySelector('.contact-item-content').onclick = () => openMikaChat();
+            container.appendChild(mikaDiv);
+        }
+
         // Locked chats are hidden from every filter until unlocked with the Chat Lock
         // PIN this session (see promptUnlockChats) -- a quick-access row appears above
         // the list whenever there's at least one, rather than mixing them into "All".
@@ -14861,12 +15047,14 @@ void main(){
         if (aiVoiceFlow) cancelAiVoiceFlow();
         currentActiveUser = "";
         currentNearbyMatchId = matchId;
+        currentMikaMode = false;
         match.unread = false;
         persistNearbyMatches();
         updateSidebarTabBadges();
 
         const panel = document.getElementById('chatPanel');
         panel.classList.remove('no-active-chat');
+        panel.classList.remove('mika-mode');
         panel.classList.add('nearby-mode');
         panel.style.display = 'flex';
 
@@ -14952,6 +15140,193 @@ void main(){
             if (!socket) return resolve(null);
             socket.emit('get_user_public_key', username, (pubKey) => resolve(pubKey || null));
         });
+    }
+
+    /* MIKA BRIDGE — admin-only chat with Mika over the audited issue/run bridge
+       (POST /api/admin/mika/message, GET /api/admin/mika/requests, 'mika_reply' socket
+       push — see backend/server.js MYAG-130). Deliberately NOT end-to-end encrypted and
+       NOT a peer conversation: there is no recipient public key, no socket relay of the
+       raw message, nothing here goes through encryptPayloadForUser/send_private_message.
+       Every send is a fresh authenticated REST call the server re-checks is_admin on. */
+
+    // Restores request/reply history from the server on session start (never from a
+    // local cache — see the currentMikaMode state comment) so a refresh/reconnect
+    // doesn't lose it, without ever writing anything Mika-related to disk client-side.
+    async function loadMikaRequests() {
+        if (!isAdmin) return;
+        try {
+            const data = await authFetchJSON('/api/admin/mika/requests', 'GET');
+            mikaRequests = (data && data.requests) || [];
+        } catch (err) {
+            console.error('Failed to load Mika request history:', err.message);
+        }
+        renderSidebarContacts();
+        if (currentMikaMode) renderMikaChatMessages();
+    }
+
+    function openMikaChat() {
+        if (!isAdmin) return; // server is still the real gate; this just keeps the UI honest
+        exitAuxPanelSilently();
+        if (aiVoiceFlow) cancelAiVoiceFlow();
+        stopOutgoingTyping();
+        stopNearbyCountdownInterval();
+        currentNearbyMatchId = null;
+        currentActiveUser = "";
+        currentMikaMode = true;
+        mikaHasUnseenReply = false;
+
+        const panel = document.getElementById('chatPanel');
+        panel.classList.remove('no-active-chat', 'nearby-mode');
+        panel.classList.add('mika-mode');
+        panel.style.display = 'flex';
+        panel.classList.remove('friend-gate-active');
+
+        document.getElementById('activeChatTargetDisplay').innerHTML = `
+            <div class="header-recipient-box" style="cursor: default;">
+                <div class="header-recipient-avatar mika-avatar">${icon('sparkle')}</div>
+                <div>
+                    <h2 style="margin: 0; font-size: 20px; font-weight: 700;">Mika</h2>
+                    <span style="font-size: 11px; color: var(--text-muted);">Admin-only &middot; Multica assistant</span>
+                </div>
+            </div>
+        `;
+        const input = document.getElementById('messageInput');
+        input.placeholder = 'Message Mika…';
+
+        document.getElementById('emojiPicker').style.display = 'none';
+        emojiPickerReactionTarget = null;
+        cancelReplyContext();
+        cancelMessageEdit();
+
+        renderSidebarContacts();
+        renderMikaChatMessages();
+        animateChatOpen(null); // plain open — Mika's row lives in the same list, but keep this as low-risk as Nearby's
+
+        loadMikaRequests();
+    }
+
+    function buildMikaBubbleNode(req, side) {
+        const row = document.createElement('div');
+        row.classList.add('msg-row', side === 'me' ? 'user' : 'other');
+
+        const containerDiv = document.createElement('div');
+        containerDiv.className = 'msg-container';
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'msg';
+
+        if (side === 'me') {
+            const textContent = document.createElement('div');
+            textContent.className = 'msg-text';
+            const textSpan = document.createElement('span');
+            textSpan.className = 'msg-text-content';
+            textSpan.innerText = req.message || '';
+            textContent.appendChild(textSpan);
+            const inlineMeta = document.createElement('span');
+            inlineMeta.className = 'msg-meta msg-meta-inline';
+            inlineMeta.innerHTML = formatBubbleTime(req.createdAt ? new Date(req.createdAt).getTime() : Date.now());
+            textContent.appendChild(inlineMeta);
+            bubbleDiv.appendChild(textContent);
+        } else if (req.status === 'completed' && req.reply) {
+            bubbleDiv.classList.add('mika-reply-bubble');
+            const textContent = document.createElement('div');
+            textContent.className = 'msg-text';
+            const textSpan = document.createElement('span');
+            textSpan.className = 'msg-text-content';
+            textSpan.innerText = req.reply;
+            textContent.appendChild(textSpan);
+            bubbleDiv.appendChild(textContent);
+            const caption = document.createElement('div');
+            caption.className = 'mika-run-caption';
+            caption.innerText = req.correlationId ? `Answered via run ${req.correlationId}` : 'Answered';
+            bubbleDiv.appendChild(caption);
+        } else if (req.status === 'pending') {
+            bubbleDiv.classList.add('mika-reply-bubble', 'mika-status-pending');
+            const spinner = document.createElement('span');
+            spinner.className = 'mika-status-spinner';
+            bubbleDiv.appendChild(spinner);
+            const label = document.createElement('span');
+            label.innerText = 'Mika is thinking…';
+            bubbleDiv.appendChild(label);
+        } else {
+            bubbleDiv.classList.add('mika-reply-bubble', 'mika-status-error');
+            const label = document.createElement('span');
+            label.innerText = req.status === 'timeout'
+                ? "Mika didn't respond in time."
+                : (req.error || 'Could not reach Mika right now.');
+            bubbleDiv.appendChild(label);
+            const retryBtn = document.createElement('button');
+            retryBtn.type = 'button';
+            retryBtn.className = 'mika-retry-btn';
+            retryBtn.innerHTML = icon('retry') + '<span>Retry</span>';
+            retryBtn.onclick = () => retryMikaRequest(req.message);
+            bubbleDiv.appendChild(retryBtn);
+        }
+
+        containerDiv.appendChild(bubbleDiv);
+        row.appendChild(containerDiv);
+        return row;
+    }
+
+    function renderMikaChatMessages() {
+        const container = document.getElementById('messages');
+        container.innerHTML = '';
+        document.getElementById('pinnedMessageBanner').style.display = 'none';
+
+        if (!mikaRequests.length) {
+            const empty = document.createElement('div');
+            empty.className = 'contacts-empty-state';
+            empty.innerHTML = `${icon('sparkle')}<p>Ask Mika anything.</p><span>Each message opens a tracked Multica run — this is an auditable one-off exchange, not a continuous chat.</span>`;
+            container.appendChild(empty);
+            return;
+        }
+        mikaRequests.slice().reverse().forEach(req => {
+            container.appendChild(buildMikaBubbleNode(req, 'me'));
+            container.appendChild(buildMikaBubbleNode(req, 'mika'));
+        });
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // Single send path for both the composer and Retry — a resend after 'failed'/
+    // 'timeout' is a deliberate NEW request (the backend's idempotency window only
+    // reuses 'pending'/'completed' rows, see server.js mika/message), so no separate
+    // retry endpoint is needed.
+    async function dispatchMikaMessage(text) {
+        if (mikaRequests.some(r => r.status === 'pending' && r.message === text)) {
+            return showToast('Already waiting on that message.', 'info');
+        }
+
+        const optimistic = { requestId: 'pending-' + Date.now(), correlationId: '', message: text, status: 'pending', reply: null, error: null, createdAt: Date.now() };
+        mikaRequests.unshift(optimistic);
+        renderSidebarContacts();
+        if (currentMikaMode) renderMikaChatMessages();
+
+        try {
+            const res = await authFetchJSON('/api/admin/mika/message', 'POST', { message: text });
+            // Reconciled onto the SAME object (not a new one) so the eventual mika_reply
+            // socket push — keyed by this real requestId — can find and update it in place.
+            optimistic.requestId = res.requestId;
+            optimistic.correlationId = res.correlationId || '';
+            optimistic.status = res.status || 'pending';
+            if (res.status === 'completed') optimistic.reply = res.reply;
+        } catch (err) {
+            optimistic.status = 'failed';
+            optimistic.error = err.message;
+        }
+        renderSidebarContacts();
+        if (currentMikaMode) renderMikaChatMessages();
+    }
+
+    function sendMikaMessage() {
+        const input = document.getElementById('messageInput');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        dispatchMikaMessage(text);
+    }
+
+    function retryMikaRequest(text) {
+        if (!text) return;
+        dispatchMikaMessage(text);
     }
 
     /* MOBILE "MORPH" TRANSITION — the chat panel expands directly out of the tapped
@@ -15129,19 +15504,36 @@ void main(){
 
         // Nothing else was open underneath — fall back to the empty/list state exactly
         // like closing a chat with no other chat to return to.
-        if (!currentActiveUser && !currentNearbyMatchId) {
+        if (!currentActiveUser && !currentNearbyMatchId && !currentMikaMode) {
             panel.classList.add('no-active-chat');
             document.body.classList.remove('mobile-chat-open');
             if (window.innerWidth <= 768) renderSidebarContacts();
             return;
         }
-        // A chat or Nearby match was already open before this aux view — its content
-        // was only CSS-hidden (aux-mode), never torn down, so it just reappears.
+        // A chat, Nearby match, or Mika chat was already open before this aux view — its
+        // content was only CSS-hidden (aux-mode), never torn down, so it just reappears.
         if (currentNearbyMatchId) panel.classList.add('nearby-mode');
+        if (currentMikaMode) panel.classList.add('mika-mode');
         animateChatOpen(null);
     }
 
     function exitMobileChatView() {
+        if (currentMikaMode) {
+            currentMikaMode = false;
+            const chatPanel = document.getElementById('chatPanel');
+            chatPanel.classList.remove('mika-mode');
+            chatPanel.classList.add('no-active-chat');
+            // Same defensive clear as animateChatOpen's fast path — this close never
+            // runs the morph transition, so it must not leave (or inherit) any stale
+            // inline transform/opacity that could make the NEXT plain open invisible.
+            chatPanel.style.transition = '';
+            chatPanel.style.transform = '';
+            chatPanel.style.opacity = '';
+            chatPanel.style.zIndex = '';
+            document.body.classList.remove('mobile-chat-open');
+            renderSidebarContacts();
+            return;
+        }
         if (currentNearbyMatchId) {
             stopNearbyCountdownInterval();
             currentNearbyMatchId = null;
@@ -15203,11 +15595,14 @@ void main(){
         currentActiveUser = username;
         stopNearbyCountdownInterval();
         currentNearbyMatchId = null; // mutually exclusive with a regular chat
+        currentMikaMode = false; // mutually exclusive with a regular chat
 
         const panel = document.getElementById('chatPanel');
         panel.classList.remove('no-active-chat');
         panel.classList.remove('nearby-mode');
-        
+        panel.classList.remove('mika-mode');
+        document.getElementById('messageInput').placeholder = 'Type an encrypted message...';
+
         const isGroup = isGroupChatKey(username);
         const group = isGroup ? myGroups[groupIdFromKey(username)] : null;
 
@@ -15976,6 +16371,7 @@ void main(){
 
     async function sendPrivateMessage() {
         if (aiVoiceFlow) cancelAiVoiceFlow();
+        if (currentMikaMode) return sendMikaMessage();
         if (currentNearbyMatchId) return sendNearbyMessage();
         if (isGroupChatKey(currentActiveUser)) return sendGroupTextMessage();
         if (!currentActiveUser) return showToast("Select a conversation path thread first.", 'info');
