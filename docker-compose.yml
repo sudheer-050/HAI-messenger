@@ -50,6 +50,7 @@ services:
       # hostname resolve on Linux Docker hosts too.
       - OLLAMA_URL=http://host.docker.internal:11434
       - OLLAMA_CHAT_MODEL=llama3.2
+      - KOKORO_TTS_URL=http://kokoro-tts:8880
       # Mika bridge — admin-only. These three vars must be set in .env for the
       # /api/admin/mika/message endpoint to be active (503 otherwise). The
       # backend talks to Multica via the `multica` CLI, not a REST token, so
@@ -88,6 +89,21 @@ services:
       - JOBS_FEED_URL=https://raw.githubusercontent.com/sudheer-050/HAI-messenger/master/jobs/feed.json
       - FEED_CACHE_TTL=300
 
+  # Local Kokoro TTS inference — CPU-only, no cloud dependency.
+  # Internal-only: backend reaches it as http://kokoro-tts:8880.
+  # 127.0.0.1 host port is for manual smoke-testing only.
+  # Voice is set via DEFAULT_VOICE; swap it in .env and restart without
+  # rebuilding. Model weights (~82 MB) are cached in kokoro_models volume.
+  kokoro-tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2
+    restart: unless-stopped
+    environment:
+      - DEFAULT_VOICE=${KOKORO_VOICE:-af_heart}
+    ports:
+      - "127.0.0.1:8880:8880"
+    volumes:
+      - kokoro_models:/app/models
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -102,3 +118,4 @@ services:
 volumes:
   pgdata:
   libretranslate_models:
+  kokoro_models:
