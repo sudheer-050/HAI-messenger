@@ -4,6 +4,6 @@
   "type": "module",
   "description": "Standalone deterministic voice-command registry/parser. No runtime dependencies.",
   "scripts": {
-    "test": "node --test commandParser.test.js voice-controller.test.js"
+    "test": "node --test commandParser.test.js voice-controller.test.js close-chat.test.js"
   }
 }
