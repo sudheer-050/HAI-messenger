@@ -31,6 +31,12 @@ services:
 
   backend:
     build: ./backend
+    # Explicit, stable image name/tag -- the Mika fast-path deploy pipeline
+    # (deploy/mika-fastpath/) tags this image as hurricane-backend:last-good
+    # before each fast-path deploy so rollback.sh has a known name to restore,
+    # independent of whatever compose's default per-project image name would
+    # otherwise be.
+    image: hurricane-backend:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"

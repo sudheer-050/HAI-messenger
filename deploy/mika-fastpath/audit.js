@@ -1,0 +1,111 @@
+/**
+ * Mika fast-path audit trail (MYAG-197)
+ *
+ * Every fast-path attempt -- allowed-and-deployed, allowed-but-rolled-back,
+ * or rejected by the carve-out -- produces exactly one audit record. This
+ * module only formats that record and posts it; the caller decides which
+ * issue it goes on. Posting reuses the `multica` CLI the Mika bridge already
+ * requires to be installed/authenticated in the backend image (see
+ * backend/mika-bridge.js and .env.example) -- this does not add a new
+ * credential surface.
+ */
+'use strict';
+
+const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function formatAuditComment({
+    outcome, // 'deployed' | 'rolled_back' | 'rejected'
+    correlationId,
+    adminRequestSummary,
+    changedFiles = [],
+    blockedFiles = [],
+    healthCheck = null,
+    error = null,
+}) {
+    const lines = [];
+    const headline = {
+        deployed: 'Fast-path deploy succeeded',
+        rolled_back: 'Fast-path deploy failed health check -- rolled back',
+        rejected: 'Fast-path rejected -- routed to normal review',
+    }[outcome] || `Fast-path result: ${outcome}`;
+
+    lines.push(`### ${headline}`);
+    if (correlationId) lines.push(`**Correlation ID:** \`${correlationId}\``);
+    lines.push('');
+    lines.push(`**Admin request:** ${adminRequestSummary || '(not provided)'}`);
+
+    if (changedFiles.length) {
+        lines.push('');
+        lines.push('**Changed files:**');
+        for (const f of changedFiles) lines.push(`- \`${f}\``);
+    }
+
+    if (outcome === 'rejected') {
+        lines.push('');
+        lines.push('**Blocked by the crypto/secrets carve-out:**');
+        for (const f of blockedFiles) lines.push(`- \`${f}\``);
+        lines.push('');
+        lines.push('A normal issue has been filed for a human/specialist to handle this change through the standard review pipeline. Nothing was built or deployed.');
+    }
+
+    if (outcome === 'deployed') {
+        lines.push('');
+        lines.push('**Health check:** passed');
+        if (healthCheck) {
+            for (const r of healthCheck.results) lines.push(`- ${r.name} (\`${r.path}\`): ok`);
+        }
+    }
+
+    if (outcome === 'rolled_back') {
+        lines.push('');
+        lines.push('**Health check:** failed post-deploy -- automatic rollback to the last known-good version was performed.');
+        if (healthCheck) {
+            for (const r of healthCheck.results) {
+                lines.push(`- ${r.name} (\`${r.path}\`): ${r.ok ? 'ok' : `FAILED (${r.detail || 'no detail'})`}`);
+            }
+        }
+        lines.push('');
+        lines.push('The prior working deployment has been restored.');
+    }
+
+    if (error) {
+        lines.push('');
+        lines.push(`**Error:** ${error}`);
+    }
+
+    return lines.join('\n');
+}
+
+function runMulticaCli(cliPath, args) {
+    return new Promise((resolve, reject) => {
+        execFile(cliPath, args, { timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) return reject(new Error(`${cliPath} ${args.join(' ')} failed: ${stderr || err.message}`));
+            resolve(stdout);
+        });
+    });
+}
+
+// Writes the body to a workdir-local temp file first, per the platform's
+// comment-formatting rule (never inline --content for agent-authored bodies).
+async function postAuditComment({ cliPath = 'multica', issueId, body, parentCommentId, workdir = process.cwd() }) {
+    const tmpPath = path.join(workdir, `.mika-fastpath-audit-${Date.now()}.md`);
+    fs.writeFileSync(tmpPath, body, 'utf8');
+    try {
+        const args = ['issue', 'comment', 'add', issueId, '--content-file', tmpPath];
+        if (parentCommentId) args.push('--parent', parentCommentId);
+        return await runMulticaCli(cliPath, args);
+    } finally {
+        fs.unlinkSync(tmpPath);
+    }
+}
+
+async function fileNormalIssue({ cliPath = 'multica', title, descriptionPath, projectId }) {
+    const args = ['issue', 'create', '--title', title, '--description-file', descriptionPath, '--status', 'todo'];
+    if (projectId) args.push('--project', projectId);
+    return runMulticaCli(cliPath, args);
+}
+
+module.exports = { formatAuditComment, postAuditComment, fileNormalIssue, runMulticaCli };
