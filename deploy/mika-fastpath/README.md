@@ -6,6 +6,16 @@ health check → automatic rollback on failure, with a hard, code-enforced
 carve-out that routes anything touching crypto/secrets to the normal review
 pipeline instead of the fast path.
 
+### CI workflow
+
+`ci/mika-fastpath.workflow.yml` is a ready-to-use GitHub Actions workflow, but
+it lives outside `.github/workflows/` on purpose: this PR was pushed with a
+token that lacks the `workflow` OAuth scope, and GitHub rejects any push that
+touches `.github/workflows/*` without it. Someone with that scope (or via the
+GitHub web UI, which isn't subject to this restriction) needs to copy this
+file to `.github/workflows/mika-fastpath.yml` for it to actually run as a
+workflow — it does nothing sitting here.
+
 ### Pieces
 
 | File | Role |
