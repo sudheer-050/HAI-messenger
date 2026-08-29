@@ -9395,7 +9395,11 @@ void main(){
                 </div>
             </div>`;
         document.getElementById('haiActionsFriendGateCancel').onclick = () => clearHaiActionsResponse();
-        document.getElementById('haiActionsFriendGateSend').onclick = async () => {
+        document.getElementById('haiActionsFriendGateSend').onclick = async (e) => {
+            // Disabling synchronously (before the await) blocks a double-click/double-tap from
+            // firing ensureFriendRequestSent twice -- JS can't process the second click event
+            // until this handler yields, and disabled is the very first thing it does.
+            e.currentTarget.disabled = true;
             try {
                 await ensureFriendRequestSent(username);
                 renderHaiActionsSuccess(`Friend request sent to ${name}. You can send your message once they accept.`);
@@ -9423,46 +9427,100 @@ void main(){
                 </div>
             </div>`;
         document.getElementById('haiActionsSendEdit').onclick = () => {
+            detachHaiSendAttempt();
             document.getElementById('haiActionsInput').value = message;
             clearHaiActionsResponse();
             focusHaiActionsInput();
         };
-        document.getElementById('haiActionsSendCancel').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsSendCancel').onclick = () => {
+            detachHaiSendAttempt();
+            clearHaiActionsResponse();
+        };
         document.getElementById('haiActionsSendConfirm').onclick = () => executeHaiSendMessage(username, message);
         // Tier A: bare Enter must never send (it's the muscle-memory "send" key
         // everywhere else in this app) -- default focus sits on Cancel, not Send.
         document.getElementById('haiActionsSendCancel').focus();
     }
 
-    function waitForNewMessageId(username, beforeIds, timeoutMs) {
-        return new Promise((resolve) => {
-            const start = Date.now();
-            (function poll() {
-                const thread = conversationHistory[username] || [];
-                const found = thread.find((m) => m.sender === 'You' && !beforeIds.has(m.id));
-                if (found) return resolve(found.id);
-                if (Date.now() - start > timeoutMs) return resolve(null);
-                setTimeout(poll, 150);
-            })();
-        });
+    // Tracks the in-flight (or most recently rendered) Quick Actions send so a double-click on
+    // Send/Retry, or a Retry fired while the original attempt is merely slow (not actually
+    // failed), can't fire a second real socket emit for the same logical message. `active` stays
+    // true past the point the "couldn't confirm" card renders -- see watchForHaiSendResult.
+    let haiSendAttempt = null;
+
+    function detachHaiSendAttempt() {
+        // Called when the user navigates away from the pending attempt's card (Edit/Cancel/
+        // Discard) so a late-arriving ack doesn't overwrite whatever the panel shows next.
+        // The background watch (if any) keeps polling harmlessly; it just stops touching the DOM.
+        haiSendAttempt = null;
+    }
+
+    function disableHaiActionsSendControls() {
+        const confirmBtn = document.getElementById('haiActionsSendConfirm');
+        if (confirmBtn) confirmBtn.disabled = true;
+        const retryBtn = document.getElementById('haiActionsSendRetry');
+        if (retryBtn) retryBtn.disabled = true;
+    }
+
+    const HAI_SEND_FAST_TIMEOUT_MS = 4000;
+    // Real confirmations (a slow get_user_public_key round trip, etc.) can land well after the
+    // fast timeout. The attempt stays active until this ceiling, so a Retry click in that window
+    // is treated as a no-op (see executeHaiSendMessage) instead of firing a genuine duplicate send.
+    const HAI_SEND_MAX_WATCH_MS = 20000;
+
+    function watchForHaiSendResult(attempt, username, beforeIds) {
+        const start = Date.now();
+        let shownError = false;
+        (function poll() {
+            if (!attempt.active) return;
+            const thread = conversationHistory[username] || [];
+            const found = thread.find((m) => m.sender === 'You' && !beforeIds.has(m.id));
+            const elapsed = Date.now() - start;
+            if (found) {
+                attempt.active = false;
+                if (haiSendAttempt === attempt) renderHaiActionsSendSuccess(username, found.id);
+                return;
+            }
+            if (elapsed > HAI_SEND_MAX_WATCH_MS) {
+                attempt.active = false;
+                if (haiSendAttempt === attempt) {
+                    renderHaiActionsSendError(username, attempt.message, "Couldn't confirm the message sent — check the chat before retrying.");
+                }
+                return;
+            }
+            if (elapsed > HAI_SEND_FAST_TIMEOUT_MS && !shownError) {
+                shownError = true;
+                if (haiSendAttempt === attempt) {
+                    renderHaiActionsSendError(username, attempt.message, "Couldn't confirm the message sent — check the chat before retrying.");
+                }
+            }
+            setTimeout(poll, 150);
+        })();
     }
 
     function executeHaiSendMessage(username, message) {
+        if (haiSendAttempt && haiSendAttempt.active && haiSendAttempt.username === username && haiSendAttempt.message === message) {
+            // Same message already sending/awaiting confirmation -- a double-click or an
+            // impatient Retry must never fire a second real send.
+            disableHaiActionsSendControls();
+            return;
+        }
         if (!navigator.onLine) {
             return renderHaiActionsSendError(username, message, "Couldn't send — you're offline. Your message is saved.");
         }
+        const attempt = { username, message, active: true };
+        haiSendAttempt = attempt;
+        disableHaiActionsSendControls();
         if (username !== currentActiveUser) switchConversationRoom(username);
         const input = document.getElementById('messageInput');
         input.value = message;
         const beforeIds = new Set((conversationHistory[username] || []).map((m) => m.id));
         sendPrivateMessage();
-        // sendPrivateMessage() is not a Promise (it resolves via a socket.emit ack
-        // callback internally) -- poll briefly for the new local message id rather
-        // than duplicate its send logic here, so success/Undo can reference it.
-        waitForNewMessageId(username, beforeIds, 4000).then((id) => {
-            if (id) renderHaiActionsSendSuccess(username, id);
-            else renderHaiActionsSendError(username, message, "Couldn't confirm the message sent — check the chat before retrying.");
-        });
+        // sendPrivateMessage() is not a Promise (it resolves via a socket.emit ack callback
+        // internally) -- poll for the new local message id rather than duplicate its send logic
+        // here, so success/Undo can reference it. See watchForHaiSendResult for why polling
+        // continues past the "couldn't confirm" card instead of abandoning the attempt.
+        watchForHaiSendResult(attempt, username, beforeIds);
     }
 
     function renderHaiActionsSendSuccess(username, messageId) {
@@ -9501,11 +9559,15 @@ void main(){
             </div>`;
         document.getElementById('haiActionsSendRetry').onclick = () => executeHaiSendMessage(username, message);
         document.getElementById('haiActionsSendEdit2').onclick = () => {
+            detachHaiSendAttempt();
             document.getElementById('haiActionsInput').value = message;
             clearHaiActionsResponse();
             focusHaiActionsInput();
         };
-        document.getElementById('haiActionsSendDiscard').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsSendDiscard').onclick = () => {
+            detachHaiSendAttempt();
+            clearHaiActionsResponse();
+        };
     }
 
     /* ── change_setting (Tier A confirm for read receipts/last seen; Tier B
