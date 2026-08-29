@@ -736,7 +736,8 @@
         .chat-area.settings-aux-mode #settingsAuxView,
         .chat-area.friends-aux-mode #friendsAuxView,
         .chat-area.groupinfo-aux-mode #groupInfoAuxView,
-        .chat-area.status-aux-mode #statusAuxView { display: flex; }
+        .chat-area.status-aux-mode #statusAuxView,
+        .chat-area.hai-aux-mode #haiActionsAuxView { display: flex; }
 
         .friend-request-row {
             display: flex;
@@ -3573,7 +3574,8 @@
         .chat-area.trash-aux-mode #trashAuxView,
         .chat-area.settings-aux-mode #settingsAuxView,
         .chat-area.friends-aux-mode #friendsAuxView,
-        .chat-area.groupinfo-aux-mode #groupInfoAuxView {
+        .chat-area.groupinfo-aux-mode #groupInfoAuxView,
+        .chat-area.hai-aux-mode #haiActionsAuxView {
             background: var(--bg-chat);
         }
         .chat-area-aux-view .profile-card,
@@ -3785,6 +3787,77 @@
             from { opacity: 0; transform: translateX(36px); }
             to   { opacity: 1; transform: translateX(0); }
         }
+
+        /* ── QUICK ACTIONS (HAI text command panel) ─────────────────────────────
+           Distinct, on purpose, from "Talk to H" (a conversation) and Global Voice
+           Control (a mic) -- see MYAG-181. This panel *does things*, it doesn't chat. */
+        .hai-actions-card { display: flex; flex-direction: column; }
+        .hai-actions-subtitle {
+            font-size: 12px; color: var(--text-muted); margin: -6px 0 14px; padding: 0 2px;
+        }
+        .hai-actions-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        .hai-actions-input-row {
+            display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+        }
+        .hai-actions-input-row input {
+            flex: 1; padding: 12px 14px; background-color: var(--input-bg);
+            border: 1px solid var(--border-color); border-radius: 12px;
+            color: var(--text-normal); font-size: 14px; font-family: var(--font-stack);
+        }
+        .hai-actions-input-row input:disabled { opacity: 0.5; }
+        .hai-actions-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .hai-actions-chip {
+            border: 1px solid var(--border-color); background: none; border-radius: 20px;
+            padding: 7px 12px; font-size: 12px; color: var(--text-muted); cursor: pointer;
+            font-family: var(--font-stack);
+        }
+        .hai-actions-chip:hover { background: rgba(0,0,0,0.04); color: var(--text-normal); }
+        .hai-actions-offline-banner {
+            display: none; font-size: 12px; color: var(--text-muted); padding: 8px 10px;
+            border-radius: 10px; background: rgba(218, 55, 60, 0.1); flex-shrink: 0;
+        }
+        .hai-actions-offline .hai-actions-offline-banner { display: block; }
+        .hai-actions-offline .hai-actions-input-row input { opacity: 0.5; }
+        .hai-actions-response { display: flex; flex-direction: column; gap: 10px; }
+        .hai-actions-thinking { padding: 4px 2px; }
+        .hai-actions-card-block {
+            border: 1px solid var(--border-color); border-radius: 14px; padding: 14px;
+            display: flex; flex-direction: column; gap: 10px; background: var(--input-bg);
+        }
+        .hai-actions-card-title { font-size: 13px; font-weight: 600; color: var(--text-normal); display: flex; align-items: center; gap: 6px; }
+        .hai-actions-card-title .icon { width: 16px; height: 16px; }
+        .hai-actions-card-detail { font-size: 12px; color: var(--text-muted); }
+        .hai-actions-candidate-row {
+            display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px;
+            cursor: pointer; border: 1px solid transparent; background: none; width: 100%;
+            text-align: left; font-family: var(--font-stack); min-height: 44px; box-sizing: border-box;
+        }
+        .hai-actions-candidate-row:hover { background: rgba(0,0,0,0.04); }
+        .hai-actions-candidate-avatar {
+            width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+            background: var(--accent-brand); color: #fff; display: flex; align-items: center;
+            justify-content: center; font-weight: 700; font-size: 13px; background-size: cover; background-position: center top;
+        }
+        .hai-actions-candidate-body { flex: 1; overflow: hidden; }
+        .hai-actions-candidate-name { font-weight: 600; color: var(--text-normal); font-size: 13px; }
+        .hai-actions-candidate-sub { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hai-actions-preview-bubble-wrap { padding: 4px 0; }
+        .hai-actions-actions-row { display: flex; gap: 8px; justify-content: flex-end; }
+        .hai-actions-btn {
+            border: none; border-radius: 20px; padding: 9px 16px; font-size: 13px; font-weight: 600;
+            cursor: pointer; font-family: var(--font-stack); min-height: 44px;
+        }
+        .hai-actions-btn.primary { background: var(--accent-brand); color: #fff; }
+        .hai-actions-btn.secondary { background: rgba(0,0,0,0.06); color: var(--text-normal); }
+        .hai-actions-btn.danger { background: rgba(218, 55, 60, 0.15); color: var(--accent-red); }
+        .hai-actions-btn:disabled { opacity: 0.55; cursor: default; }
+        .hai-actions-status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+        .hai-actions-status-line.success { color: var(--accent-green); }
+        .hai-actions-status-line.error { color: var(--accent-red); }
+        .hai-actions-status-line .icon { width: 16px; height: 16px; flex-shrink: 0; }
+        @media (max-width: 768px) {
+            .hai-actions-card { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+        }
     </style>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
@@ -3940,6 +4013,7 @@
                         <div class="header-menu-dropdown hamburger-dropdown" id="hamburgerMenuDropdown">
                             <button type="button" onclick="hamburgerMenuProfile()"><span data-icon="user"></span> Profile</button>
                             <button type="button" onclick="hamburgerMenuTalkToH()"><span data-icon="sparkle"></span> Talk to H</button>
+                            <button type="button" onclick="openHaiActionsPanel()"><span data-icon="commandBolt"></span> Quick Actions</button>
                             <button type="button" onclick="openCreateGroupModal()"><span data-icon="users"></span> New Group</button>
                             <button type="button" onclick="openFriendsModal()"><span data-icon="userPlus"></span> Friend Requests<span id="friendRequestsBadge" class="friend-requests-badge" style="display:none;"></span></button>
                             <button type="button" onclick="openStatusAuxView()"><span data-icon="statusRing"></span> Status</button>
@@ -4344,6 +4418,32 @@
                 </div>
             </div>
         </div>
+
+        <!-- QUICK ACTIONS (HAI) — opens in-panel exactly like Settings/Profile do,
+             not a modal. "Does things in the app — not a conversation": distinct from
+             "Talk to H" (a Q&A page) and Global Voice Control (a mic). See MYAG-181. -->
+        <div class="chat-area-aux-view" id="haiActionsAuxView">
+            <div class="trash-card hai-actions-card">
+                <div class="trash-header">
+                    <h3 style="display: flex; align-items: center; gap: 8px;"><span data-icon="commandBolt"></span> Quick Actions</h3>
+                    <button type="button" class="profile-close-btn" style="position: static;" onclick="closeHaiActionsPanel()"><span data-icon="close"></span></button>
+                </div>
+                <p class="hai-actions-subtitle">Does things in the app — not a conversation.</p>
+                <div class="hai-actions-offline-banner" id="haiActionsOfflineBanner">You're offline — Quick Actions needs a connection.</div>
+                <div class="hai-actions-body">
+                    <div class="hai-actions-response" id="haiActionsResponse" aria-live="polite"></div>
+                    <div class="hai-actions-chips" id="haiActionsChips">
+                        <button type="button" class="hai-actions-chip" onclick="submitHaiActionsChip(this)">Tell Priya I'm on my way</button>
+                        <button type="button" class="hai-actions-chip" onclick="submitHaiActionsChip(this)">Turn off read receipts</button>
+                        <button type="button" class="hai-actions-chip" onclick="submitHaiActionsChip(this)">Open chat with Maria</button>
+                    </div>
+                </div>
+                <div class="hai-actions-input-row">
+                    <input type="text" id="haiActionsInput" placeholder="Tell Quick Actions what to do…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" onkeydown="handleHaiActionsInputKeyDown(event)">
+                    <button type="button" class="send-btn" id="haiActionsSendBtn" onclick="submitHaiActionsInput()" aria-label="Send instruction"><span data-icon="send"></span></button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -4694,6 +4794,16 @@
     </button>
     <div class="status-fab-tray" id="statusFabTray"></div>
 </div>
+
+<!-- Quick Actions (HAI) pure parser — the only ES module in this no-build-step app.
+     Module scripts can't share the classic script's top-level `let`/`const` state
+     (conversationHistory, currentActiveUser, etc. below aren't on `window`), so this
+     bootstrap only exposes the parser function itself; all app-state-aware dispatch
+     logic lives in the classic script and just calls window.parseQuickAction(text). -->
+<script type="module">
+    import { parseQuickAction } from './hai/actionParser.js';
+    window.parseQuickAction = parseQuickAction;
+</script>
 
 <script>
     let socket;
@@ -6839,6 +6949,7 @@
         folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
         gamepad: '<line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="13" r="1"/><circle cx="18" cy="11" r="1"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.152A4 4 0 0 0 17.32 5z"/>',
         sparkle: '<path d="M12 2l1.8 5.8L20 9.5l-6.2 1.7L12 17l-1.8-5.8L4 9.5l6.2-1.7L12 2z"/><path d="M19 15l.9 2.9L23 19l-3.1.9L19 22l-.9-2.1L15 19l3.1-1.1L19 15z"/>',
+        commandBolt: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M13 8l-3.5 5h3l-1 3.5 3.5-5h-3z" fill="currentColor" stroke="none"/>',
         statusRing: '<circle cx="12" cy="12" r="8.5" stroke-dasharray="3.2 3.2"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
         menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
         settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
@@ -7062,7 +7173,8 @@
             { iconName: 'folder', title: 'Files', onClick: triggerDocumentPicker },
             { iconName: 'pin', title: 'Location', onClick: shareLiveLocation },
             { iconName: 'mic', title: 'Audio Recording', onClick: openVoiceRecorderModal },
-            { iconName: 'gamepad', title: 'Games', onClick: openGamesMenu }
+            { iconName: 'gamepad', title: 'Games', onClick: openGamesMenu },
+            { iconName: 'commandBolt', title: 'Quick Actions', onClick: openHaiActionsPanel }
         ];
     }
     function toggleAttachMenu(event) {
@@ -8856,6 +8968,33 @@ void main(){
         return substringMatch;
     }
 
+    // Same matching rules as resolveContactByName, but returns every match instead
+    // of silently taking the first one -- Quick Actions must ask "which one?" on a
+    // multi-match name rather than guess (this is the exact gap MYAG-181 found in
+    // resolveContactByName above and required Quick Actions not repeat). Exact
+    // matches (full name/first/last/username) are ranked ahead of substring ones.
+    function resolveContactCandidates(fragment) {
+        const needle = (fragment || '').trim().toLowerCase();
+        if (!needle) return [];
+        const seen = new Set();
+        const exact = [];
+        const partial = [];
+        const pool = new Set([...Object.keys(conversationHistory), ...friendsSet]);
+        for (const username of pool) {
+            if (seen.has(username)) continue;
+            seen.add(username);
+            const profile = getKnownProfile(username) || {};
+            const first = (profile.firstName || '').toLowerCase();
+            const last = (profile.lastName || '').toLowerCase();
+            const full = `${first} ${last}`.trim();
+            const uname = username.toLowerCase();
+            const entry = { username, displayName: (profile.firstName ? `${profile.firstName} ${profile.lastName || ''}`.trim() : username) };
+            if (needle === uname || needle === first || needle === last || needle === full) exact.push(entry);
+            else if (uname.includes(needle) || first.includes(needle) || full.includes(needle)) partial.push(entry);
+        }
+        return [...exact, ...partial];
+    }
+
     function dispatchVoiceCommand(transcript) {
         const text = transcript.trim();
         const lower = text.toLowerCase();
@@ -8954,6 +9093,519 @@ void main(){
     function handleVoiceStart() {
         speakText('Already listening.');
         resetVoiceSilenceTimer();
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       QUICK ACTIONS (HAI) — client-side constrained action executor. See
+       MYAG-183 (this issue), and the approved Stage-1 deliverables it
+       implements: MYAG-180 (architecture/security) and MYAG-181 (UX spec).
+
+       This whole section only ever calls window.parseQuickAction(text) (the
+       pure grammar module at frontend/hai/actionParser.js) to turn typed text
+       into a typed action, then maps that action to the exact same
+       already-authenticated app functions the manual UI buttons call
+       (switchConversationRoom, sendPrivateMessage, toggleReadReceiptsSetting,
+       etc.) — never a new endpoint, never generated/evaluated code, never a
+       server round trip for anything containing message plaintext. Ambiguous
+       recipients/settings always ask instead of guessing; send + any
+       other-visible setting change always show an exact preview and require
+       an explicit tap (never a bare Enter) before anything executes.
+       ═══════════════════════════════════════════════════════════════════════ */
+
+    window.addEventListener('online', syncHaiActionsOfflineState);
+    window.addEventListener('offline', syncHaiActionsOfflineState);
+
+    function openHaiActionsPanel() {
+        closeHamburgerMenu();
+        resetHaiActionsState();
+        openAuxPanel('hai');
+        syncHaiActionsOfflineState();
+        focusHaiActionsInput();
+    }
+
+    function closeHaiActionsPanel() {
+        closeAuxPanel();
+    }
+
+    function resetHaiActionsState() {
+        const input = document.getElementById('haiActionsInput');
+        if (input) input.value = '';
+        clearHaiActionsResponse();
+    }
+
+    function syncHaiActionsOfflineState() {
+        const panel = document.getElementById('chatPanel');
+        if (!panel || !panel.classList.contains('hai-aux-mode')) return;
+        const card = document.querySelector('#haiActionsAuxView .hai-actions-card');
+        const input = document.getElementById('haiActionsInput');
+        const sendBtn = document.getElementById('haiActionsSendBtn');
+        const offline = !navigator.onLine;
+        if (card) card.classList.toggle('hai-actions-offline', offline);
+        if (input) input.disabled = offline;
+        if (sendBtn) sendBtn.disabled = offline;
+    }
+
+    function focusHaiActionsInput() {
+        setTimeout(() => {
+            const el = document.getElementById('haiActionsInput');
+            if (el && !el.disabled) el.focus();
+        }, 50);
+    }
+
+    function handleHaiActionsInputKeyDown(event) {
+        if (event.key === 'Enter') { event.preventDefault(); submitHaiActionsInput(); }
+        else if (event.key === 'Escape') { event.preventDefault(); cancelHaiActionsStep(); }
+    }
+
+    function cancelHaiActionsStep() {
+        clearHaiActionsResponse();
+        focusHaiActionsInput();
+    }
+
+    function submitHaiActionsChip(btnEl) {
+        const input = document.getElementById('haiActionsInput');
+        input.value = btnEl.textContent;
+        submitHaiActionsInput();
+    }
+
+    async function submitHaiActionsInput() {
+        const input = document.getElementById('haiActionsInput');
+        if (!input || input.disabled) return;
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        document.getElementById('haiActionsChips').style.display = 'none';
+        renderHaiActionsThinking();
+        // The parser itself is synchronous (no network, no AI) -- this short delay
+        // only keeps the "thinking" affordance from flashing invisibly, and gives
+        // screen readers a moment to announce it before the result replaces it.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const result = window.parseQuickAction(text);
+        if (!result.ok) return handleHaiParseFailure(result);
+        routeHaiAction(result.action, result.requiresConfirmation);
+    }
+
+    function handleHaiParseFailure(result) {
+        if (result.reason === 'blocked') {
+            return renderHaiActionsError("That's not something Quick Actions can do.");
+        }
+        if (result.reason === 'ambiguous' && result.kind === 'setting' && result.candidates && result.candidates[0]) {
+            return renderHaiActionsSettingClarify(result.candidates[0], result.pendingValue);
+        }
+        return renderHaiActionsUnknown();
+    }
+
+    function routeHaiAction(action, requiresConfirmation) {
+        switch (action.type) {
+            case 'open_chat': return runHaiOpenChat(action.args.chatName);
+            case 'search': return runHaiSearch(action.args.query);
+            case 'semantic_search': return runHaiSemanticSearch(action.args.query);
+            case 'send_message': return beginHaiSendMessage(action.args);
+            case 'change_setting': return beginHaiChangeSetting(action.args, requiresConfirmation);
+            default: return renderHaiActionsUnknown();
+        }
+    }
+
+    /* ── rendering helpers ─────────────────────────────────────────────────── */
+
+    function haiActionsResponseEl() { return document.getElementById('haiActionsResponse'); }
+
+    function showHaiActionsChipsAgain() {
+        const chips = document.getElementById('haiActionsChips');
+        if (chips) chips.style.display = 'flex';
+    }
+
+    function clearHaiActionsResponse() {
+        haiActionsResponseEl().innerHTML = '';
+        showHaiActionsChipsAgain();
+    }
+
+    function renderHaiActionsThinking() {
+        haiActionsResponseEl().innerHTML = `<div class="hai-actions-thinking header-typing-status" style="display:inline-flex;"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>`;
+    }
+
+    function renderHaiActionsUnknown() {
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">I didn't catch a command</div>
+                <div class="hai-actions-card-detail">Try things like "tell priya I'm on my way", "turn off read receipts", or "open chat with maria".</div>
+            </div>`;
+        showHaiActionsChipsAgain();
+    }
+
+    function renderHaiActionsError(message) {
+        haiActionsResponseEl().innerHTML = `<div class="hai-actions-status-line error">${icon('close')}<span>${escapeSearchHtml(message)}</span></div>`;
+        showHaiActionsChipsAgain();
+    }
+
+    function renderHaiActionsSuccess(message) {
+        haiActionsResponseEl().innerHTML = `<div class="hai-actions-status-line success">${icon('checkSingle')}<span>${escapeSearchHtml(message)}</span></div>`;
+        showHaiActionsChipsAgain();
+    }
+
+    function getContactDisplayName(username) {
+        const p = getKnownProfile(username) || {};
+        return p.firstName ? `${p.firstName} ${p.lastName || ''}`.trim() : username;
+    }
+
+    function renderHaiActionsUnknownContact(rawName) {
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">I don't have a contact matching "${escapeSearchHtml(rawName)}"</div>
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsUnknownSearch">Search contacts</button>
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsUnknownCancel">Cancel</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsUnknownSearch').onclick = () => { closeHaiActionsPanel(); openUniversalSearch(); };
+        document.getElementById('haiActionsUnknownCancel').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsUnknownCancel').focus();
+    }
+
+    // Renders every match (not just the first) so the user picks -- this is the
+    // exact disambiguation gap MYAG-181 found in resolveContactByName/voice's
+    // handleVoiceSendWithText and required Quick Actions not repeat.
+    function renderHaiActionsContactClarify(candidates, onPick) {
+        const shown = candidates.slice(0, 4);
+        const rowsHtml = shown.map((c, i) => {
+            const data = getKnownProfile(c.username) || {};
+            const avatarStyle = data.avatar ? `background-image:url('${data.avatar}');` : '';
+            const initial = data.avatar ? '' : c.displayName.charAt(0).toUpperCase();
+            const thread = conversationHistory[c.username] || [];
+            const last = thread.length ? String(thread[thread.length - 1].text || '').slice(0, 40) : '';
+            return `<button type="button" class="hai-actions-candidate-row" data-hai-candidate-idx="${i}">
+                <span class="hai-actions-candidate-avatar" style="${avatarStyle}">${initial}</span>
+                <span class="hai-actions-candidate-body">
+                    <span class="hai-actions-candidate-name">${escapeSearchHtml(c.displayName)}</span>
+                    <span class="hai-actions-candidate-sub">${escapeSearchHtml(last)}</span>
+                </span>
+            </button>`;
+        }).join('');
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">Which one did you mean?</div>
+                ${rowsHtml}
+                <button type="button" class="hai-actions-candidate-row" id="haiActionsClarifyOther">
+                    <span class="hai-actions-candidate-body"><span class="hai-actions-candidate-name">Someone else — let me type again</span></span>
+                </button>
+            </div>`;
+        shown.forEach((c, i) => {
+            document.querySelector(`.hai-actions-candidate-row[data-hai-candidate-idx="${i}"]`).onclick = () => onPick(c.username);
+        });
+        document.getElementById('haiActionsClarifyOther').onclick = () => clearHaiActionsResponse();
+    }
+
+    /* ── open_chat / search / semantic_search (Tier C — no confirmation) ────── */
+
+    function runHaiOpenChat(rawName) {
+        const candidates = resolveContactCandidates(rawName);
+        if (!candidates.length) return renderHaiActionsUnknownContact(rawName);
+        if (candidates.length > 1) return renderHaiActionsContactClarify(candidates, finishHaiOpenChat);
+        finishHaiOpenChat(candidates[0].username);
+    }
+
+    function finishHaiOpenChat(username) {
+        // switchConversationRoom already shows the friend-gate banner in place of the
+        // composer for a non-friend -- Quick Actions doesn't need its own duplicate
+        // gate here the way send_message does (which can't function at all without it).
+        closeHaiActionsPanel();
+        switchConversationRoom(username);
+    }
+
+    function runHaiSearch(query) {
+        closeHaiActionsPanel();
+        openUniversalSearch();
+        const input = document.getElementById('universalSearchInput');
+        if (input) input.value = query;
+        runUniversalSearch(query);
+    }
+
+    async function runHaiSemanticSearch(query) {
+        if (!currentActiveUser) {
+            return renderHaiActionsError('Open a chat first, then ask about a topic.');
+        }
+        renderHaiActionsThinking();
+        const outcome = await runSemanticMessageSearch(query);
+        if (!outcome) return renderHaiActionsError('Semantic search failed to load.');
+        closeHaiActionsPanel();
+        renderSemanticSearchResults(outcome.topic, outcome.results);
+    }
+
+    /* ── send_message (Tier A — always requires an explicit preview/confirm) ── */
+
+    // Splits natural "tell X ..." free text into (recipient, message) by trying
+    // progressively longer word-prefixes against the real contact list and taking
+    // the longest prefix that matches at least one contact -- this app-side split
+    // is exactly what actionParser.js's CONTRACT.md documents as its own job,
+    // since the parser itself has no contact-list access.
+    function splitHaiFreeTextRecipient(freeText) {
+        const words = freeText.split(/\s+/).filter(Boolean);
+        const maxPrefixWords = Math.min(4, words.length - 1);
+        let bestCandidates = [];
+        let bestLen = 0;
+        for (let n = 1; n <= maxPrefixWords; n++) {
+            const prefix = words.slice(0, n).join(' ');
+            const candidates = resolveContactCandidates(prefix);
+            if (candidates.length) { bestCandidates = candidates; bestLen = n; }
+        }
+        if (!bestLen) return { candidates: [], message: null };
+        return { candidates: bestCandidates, message: words.slice(bestLen).join(' ') };
+    }
+
+    function beginHaiSendMessage(args) {
+        if (args.chatName != null && args.message != null) {
+            return resolveHaiSendRecipient(args.chatName, args.message);
+        }
+        const { candidates, message } = splitHaiFreeTextRecipient(args.freeText || '');
+        if (!candidates.length || !message) {
+            return renderHaiActionsUnknownContact(args.freeText || '');
+        }
+        if (candidates.length > 1) {
+            return renderHaiActionsContactClarify(candidates, (username) => proceedHaiSendMessage(username, message));
+        }
+        proceedHaiSendMessage(candidates[0].username, message);
+    }
+
+    function resolveHaiSendRecipient(rawName, message) {
+        const candidates = resolveContactCandidates(rawName);
+        if (!candidates.length) return renderHaiActionsUnknownContact(rawName);
+        if (candidates.length > 1) return renderHaiActionsContactClarify(candidates, (username) => proceedHaiSendMessage(username, message));
+        proceedHaiSendMessage(candidates[0].username, message);
+    }
+
+    function proceedHaiSendMessage(username, message) {
+        if (isUserBlocked(username)) {
+            return renderHaiActionsError(`You've blocked ${getContactDisplayName(username)}. Unblock them in Settings > Privacy to message them.`);
+        }
+        if (getFriendStatusFor(username) !== 'friends') {
+            return renderHaiActionsFriendGate(username);
+        }
+        renderHaiActionsSendPreview(username, message);
+    }
+
+    function renderHaiActionsFriendGate(username) {
+        const name = getContactDisplayName(username);
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">You and ${escapeSearchHtml(name)} aren't connected yet</div>
+                <div class="hai-actions-card-detail">Send a friend request first?</div>
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsFriendGateCancel">Cancel</button>
+                    <button type="button" class="hai-actions-btn primary" id="haiActionsFriendGateSend">Send Request</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsFriendGateCancel').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsFriendGateSend').onclick = async () => {
+            try {
+                await ensureFriendRequestSent(username);
+                renderHaiActionsSuccess(`Friend request sent to ${name}. You can send your message once they accept.`);
+            } catch (err) {
+                renderHaiActionsError(err.message || 'Could not send the friend request.');
+            }
+        };
+        // Tier A: focus never defaults to a confirm-shaped button, so a stray
+        // Enter/Space can't fire a consequential action by accident.
+        document.getElementById('haiActionsFriendGateCancel').focus();
+    }
+
+    function renderHaiActionsSendPreview(username, message) {
+        const name = getContactDisplayName(username);
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">Send this to ${escapeSearchHtml(name)}?</div>
+                <div class="hai-actions-preview-bubble-wrap">
+                    <div class="msg-row user"><div class="msg"><div class="msg-text">${escapeSearchHtml(message)}</div></div></div>
+                </div>
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSendEdit">Edit</button>
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSendCancel">Cancel</button>
+                    <button type="button" class="hai-actions-btn primary" id="haiActionsSendConfirm">Send</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsSendEdit').onclick = () => {
+            document.getElementById('haiActionsInput').value = message;
+            clearHaiActionsResponse();
+            focusHaiActionsInput();
+        };
+        document.getElementById('haiActionsSendCancel').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsSendConfirm').onclick = () => executeHaiSendMessage(username, message);
+        // Tier A: bare Enter must never send (it's the muscle-memory "send" key
+        // everywhere else in this app) -- default focus sits on Cancel, not Send.
+        document.getElementById('haiActionsSendCancel').focus();
+    }
+
+    function waitForNewMessageId(username, beforeIds, timeoutMs) {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            (function poll() {
+                const thread = conversationHistory[username] || [];
+                const found = thread.find((m) => m.sender === 'You' && !beforeIds.has(m.id));
+                if (found) return resolve(found.id);
+                if (Date.now() - start > timeoutMs) return resolve(null);
+                setTimeout(poll, 150);
+            })();
+        });
+    }
+
+    function executeHaiSendMessage(username, message) {
+        if (!navigator.onLine) {
+            return renderHaiActionsSendError(username, message, "Couldn't send — you're offline. Your message is saved.");
+        }
+        if (username !== currentActiveUser) switchConversationRoom(username);
+        const input = document.getElementById('messageInput');
+        input.value = message;
+        const beforeIds = new Set((conversationHistory[username] || []).map((m) => m.id));
+        sendPrivateMessage();
+        // sendPrivateMessage() is not a Promise (it resolves via a socket.emit ack
+        // callback internally) -- poll briefly for the new local message id rather
+        // than duplicate its send logic here, so success/Undo can reference it.
+        waitForNewMessageId(username, beforeIds, 4000).then((id) => {
+            if (id) renderHaiActionsSendSuccess(username, id);
+            else renderHaiActionsSendError(username, message, "Couldn't confirm the message sent — check the chat before retrying.");
+        });
+    }
+
+    function renderHaiActionsSendSuccess(username, messageId) {
+        const name = getContactDisplayName(username);
+        const time = formatBubbleTime(Date.now());
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-status-line success">${icon('checkSingle')}<span>Sent to ${escapeSearchHtml(name)} · ${escapeSearchHtml(time)}</span></div>
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsViewChat">View chat</button>
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsUndoSend">Undo</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsViewChat').onclick = () => { closeHaiActionsPanel(); switchConversationRoom(username); };
+        const undoBtn = document.getElementById('haiActionsUndoSend');
+        undoBtn.onclick = () => {
+            // Re-uses the app's real delete-for-everyone action/eligibility window
+            // (see deleteMessageForEveryone) rather than inventing a separate timer.
+            deleteMessageForEveryone(username, messageId);
+            undoBtn.disabled = true;
+            renderHaiActionsSuccess('Message deleted.');
+        };
+        setTimeout(() => { if (undoBtn && !undoBtn.disabled) undoBtn.style.display = 'none'; }, 6000);
+        showHaiActionsChipsAgain();
+    }
+
+    function renderHaiActionsSendError(username, message, text) {
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-status-line error">${icon('close')}<span>${escapeSearchHtml(text)}</span></div>
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSendRetry">Retry</button>
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSendEdit2">Edit</button>
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSendDiscard">Discard</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsSendRetry').onclick = () => executeHaiSendMessage(username, message);
+        document.getElementById('haiActionsSendEdit2').onclick = () => {
+            document.getElementById('haiActionsInput').value = message;
+            clearHaiActionsResponse();
+            focusHaiActionsInput();
+        };
+        document.getElementById('haiActionsSendDiscard').onclick = () => clearHaiActionsResponse();
+    }
+
+    /* ── change_setting (Tier A confirm for read receipts/last seen; Tier B
+       apply + Undo toast for notification sound/enter-is-send/font size) ───── */
+
+    const HAI_SETTING_APPLIERS = Object.freeze({
+        read_receipts: (v) => toggleReadReceiptsSetting(v),
+        last_seen: (v) => toggleLastSeenSetting(v),
+        notif_sound: (v) => toggleNotifSoundSetting(v),
+        enter_is_send: (v) => toggleEnterIsSendSetting(v),
+        font_size: (v) => setMessageFontSize(v),
+    });
+
+    function syncSettingsUiAfterHaiChange(settingKey, value) {
+        if (settingKey === 'read_receipts') { const el = document.getElementById('settingsReadReceiptsToggle'); if (el) el.checked = isReadReceiptsEnabled(); }
+        else if (settingKey === 'notif_sound') { const el = document.getElementById('settingsNotifSoundToggle'); if (el) el.checked = isNotifSoundEnabled(); }
+        else if (settingKey === 'enter_is_send') { const el = document.getElementById('settingsEnterIsSendToggle'); if (el) el.checked = isEnterIsSendEnabled(); }
+        else if (settingKey === 'font_size') { renderFontSizeButtons(); }
+        else if (settingKey === 'last_seen') { const el = document.getElementById('settingsLastSeenToggle'); if (el && typeof value === 'boolean') el.checked = value; }
+    }
+
+    function beginHaiChangeSetting(args, requiresConfirmation) {
+        let resolvedArgs = args;
+        if (args.setting === 'font_size' && args.relative) {
+            const order = ['small', 'medium', 'large'];
+            const current = getMySettings().font_size || 'medium';
+            const idx = Math.max(0, order.indexOf(current));
+            const nextIdx = Math.min(order.length - 1, Math.max(0, idx + args.relative));
+            resolvedArgs = { ...args, value: order[nextIdx], relative: null };
+        }
+        if (requiresConfirmation) renderHaiActionsSettingConfirm(resolvedArgs);
+        else applyHaiSetting(resolvedArgs);
+    }
+
+    function renderHaiActionsSettingClarify(setting, pendingValue) {
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">Did you mean ${escapeSearchHtml(setting.label)}?</div>
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSettingClarifyCancel">Cancel</button>
+                    <button type="button" class="hai-actions-btn primary" id="haiActionsSettingClarifyYes">${escapeSearchHtml(setting.label)}</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsSettingClarifyCancel').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsSettingClarifyYes').onclick = () => {
+            beginHaiChangeSetting(
+                { setting: setting.key, value: pendingValue, label: setting.label, tier: setting.tier, consequence: setting.consequence || null },
+                setting.tier === 'A'
+            );
+        };
+    }
+
+    function renderHaiActionsSettingConfirm(args) {
+        const verb = args.value ? 'Turn on' : 'Turn off';
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-card-block">
+                <div class="hai-actions-card-title">${verb} ${escapeSearchHtml(args.label)}?</div>
+                ${args.consequence ? `<div class="hai-actions-card-detail">${escapeSearchHtml(args.consequence)}</div>` : ''}
+                <div class="hai-actions-actions-row">
+                    <button type="button" class="hai-actions-btn secondary" id="haiActionsSettingCancel">Cancel</button>
+                    <button type="button" class="hai-actions-btn primary" id="haiActionsSettingConfirm">${verb}</button>
+                </div>
+            </div>`;
+        document.getElementById('haiActionsSettingCancel').onclick = () => clearHaiActionsResponse();
+        document.getElementById('haiActionsSettingConfirm').onclick = () => applyHaiSetting(args);
+        // Tier A: same no-default-focus-on-confirm rule as the send preview.
+        document.getElementById('haiActionsSettingCancel').focus();
+    }
+
+    function applyHaiSetting(args) {
+        if (!navigator.onLine && args.tier === 'A') {
+            return renderHaiActionsError("Can't change this setting while you're offline.");
+        }
+        const applier = HAI_SETTING_APPLIERS[args.setting];
+        if (!applier) return renderHaiActionsError('Unknown setting.');
+
+        let previousValue = null;
+        if (args.tier === 'B') {
+            if (args.setting === 'notif_sound') previousValue = isNotifSoundEnabled();
+            else if (args.setting === 'enter_is_send') previousValue = isEnterIsSendEnabled();
+            else if (args.setting === 'font_size') previousValue = getMySettings().font_size || 'medium';
+        }
+
+        applier(args.value);
+        syncSettingsUiAfterHaiChange(args.setting, args.value);
+
+        const valueLabel = typeof args.value === 'boolean' ? (args.value ? 'on' : 'off') : args.value;
+        haiActionsResponseEl().innerHTML = `
+            <div class="hai-actions-status-line success">${icon('checkSingle')}<span>${escapeSearchHtml(args.label)} set to ${escapeSearchHtml(String(valueLabel))}.</span></div>
+            ${args.tier === 'B' ? '<div class="hai-actions-actions-row"><button type="button" class="hai-actions-btn secondary" id="haiActionsSettingUndo">Undo</button></div>' : ''}
+        `;
+        showHaiActionsChipsAgain();
+        if (args.tier === 'B') {
+            const undoBtn = document.getElementById('haiActionsSettingUndo');
+            if (undoBtn) undoBtn.onclick = () => {
+                applier(previousValue);
+                syncSettingsUiAfterHaiChange(args.setting, previousValue);
+                clearHaiActionsResponse();
+            };
+        }
     }
 
     /* SEMANTIC TOPIC SEARCH — "find messages about X" within the currently open
@@ -11909,6 +12561,24 @@ void main(){
         document.getElementById('deleteChoiceModalOverlay').style.display = 'flex';
     }
 
+    // Shared by the manual delete-choice modal AND Quick Actions' send Undo (which
+    // re-uses this exact eligibility window/action rather than inventing its own
+    // separate undo timer/mechanism, per MYAG-181's Flow A step 6).
+    function deleteMessageForEveryone(username, id) {
+        const msg = (conversationHistory[username] || []).find(m => m.id === id);
+        if (!msg) return;
+        msg.deletedForEveryone = true;
+        msg.text = '';
+        msg.media = null;
+        msg.isStarred = false;
+        msg.isPinned = false;
+        persistConversations();
+        if (username === currentActiveUser) reloadChatHistoryScreen();
+        renderSidebarContacts();
+        if (isGroupChatKey(username)) deleteGroupMessageEveryone(id);
+        else socket.emit('delete_message_everyone', { id, targetUsername: username });
+    }
+
     function confirmDeleteChoice(choice) {
         const id = pendingDeleteId;
         pendingDeleteId = null;
@@ -11919,16 +12589,7 @@ void main(){
         if (!msg) return;
 
         if (choice === 'everyone') {
-            msg.deletedForEveryone = true;
-            msg.text = '';
-            msg.media = null;
-            msg.isStarred = false;
-            msg.isPinned = false;
-            persistConversations();
-            reloadChatHistoryScreen();
-            renderSidebarContacts();
-            if (isGroupChatKey(currentActiveUser)) deleteGroupMessageEveryone(id);
-            else socket.emit('delete_message_everyone', { id, targetUsername: currentActiveUser });
+            deleteMessageForEveryone(currentActiveUser, id);
             return;
         }
 
@@ -15162,7 +15823,7 @@ void main(){
     /* IN-PANEL AUX VIEWS — Profile/Trash/Settings open by replacing chatPanel's normal
        content (same panel, same mobile open/close animation) instead of a floating
        modal, matching how a regular chat or Nearby match opens. */
-    const AUX_PANEL_KINDS = ['profile', 'trash', 'settings', 'friends', 'status', 'groupinfo'];
+    const AUX_PANEL_KINDS = ['profile', 'trash', 'settings', 'friends', 'status', 'groupinfo', 'hai'];
     function openAuxPanel(kind) {
         const panel = document.getElementById('chatPanel');
         // Only one aux view can ever be visible at once -- switching straight from one
