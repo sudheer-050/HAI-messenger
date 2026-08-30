@@ -6,6 +6,9 @@ ingress:
     path: /jobs.*
     service: http://jobboard:5000
   - hostname: myhai.org
+    path: /analyst.*
+    service: http://analyst:5000
+  - hostname: myhai.org
     service: http://backend:3000
   - hostname: ollama.myhai.org
     service: http://ollama-proxy:4001

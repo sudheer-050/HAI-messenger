@@ -80,6 +80,22 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Auto Data Analyst — separate private repo, cloned alongside hurricane-chat
+  # on the server at ~/auto-data-analyst. Mounted at /analyst via cloudflared
+  # path routing above; the app's own wsgi.py sets SCRIPT_NAME so url_for()
+  # generates /analyst-prefixed links. See MYAG-101/MYAG-139.
+  analyst:
+    build:
+      context: ../auto-data-analyst
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    environment:
+      - SECRET_KEY=${ANALYST_SECRET_KEY}
+    volumes:
+      - analyst_uploads:/app/uploads
+      - analyst_outputs:/app/outputs
+
   jobboard:
     build: ./jobboard
     restart: unless-stopped
@@ -114,8 +130,11 @@ services:
       - backend
       - ollama-proxy
       - jobboard
+      - analyst
 
 volumes:
   pgdata:
   libretranslate_models:
   kokoro_models:
+  analyst_uploads:
+  analyst_outputs:
