@@ -3969,6 +3969,7 @@
                 </div>
 
                 <button type="button" class="btn-submit" id="authSubmitBtn" onclick="handleAuthSubmit()">Sign In</button>
+                <p style="font-size: 12px; margin-top: 12px; text-align: center; cursor: pointer; color: var(--text-muted);" onclick="resetLocalSiteData()">Trouble logging in? Reset local data on this device</p>
             </div>
 
             <!-- STEP 2: VERIFICATION -->
@@ -10229,6 +10230,41 @@ void main(){
         }
         profileStoreCache[username] = existing;
         persistProfileStore();
+    }
+
+    // RESET LOCAL SITE DATA — a same-origin escape hatch for devices where a stored
+    // key, chat-history blob, or other locally-cached value has gone bad (corrupted,
+    // or tripping a browser-specific crypto/storage quirk) and is blocking login
+    // entirely. Deliberately scoped to only this site's own storage: localStorage and
+    // IndexedDB are both already origin-isolated by the browser itself, so this can
+    // never touch data belonging to any other website, unlike clearing all browsing
+    // data from the browser's own settings.
+    async function resetLocalSiteData() {
+        if (!(await showConfirm('This clears all locally-stored chat history, keys, and settings for HAI Messenger on this device only (other devices and the server are unaffected). You will need to log in again. Continue?'))) return;
+        try {
+            localStorage.clear();
+            if (window.indexedDB && indexedDB.databases) {
+                const dbs = await indexedDB.databases();
+                await Promise.all(dbs.map(db => new Promise(resolve => {
+                    const req = indexedDB.deleteDatabase(db.name);
+                    req.onsuccess = req.onerror = req.onblocked = resolve;
+                })));
+            } else {
+                // Older engines without indexedDB.databases() -- delete the known
+                // database names directly instead of leaving them behind.
+                await Promise.all(['hai_chat_db', 'hurricane_chat_db'].map(name => new Promise(resolve => {
+                    const req = indexedDB.deleteDatabase(name);
+                    req.onsuccess = req.onerror = req.onblocked = resolve;
+                })));
+            }
+            if (navigator.serviceWorker) {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map(r => r.unregister()));
+            }
+        } catch (err) {
+            console.error('resetLocalSiteData failed partway through:', err.name, err.message);
+        }
+        location.reload();
     }
 
     async function handleAuthSubmit() {
