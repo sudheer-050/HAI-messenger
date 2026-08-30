@@ -10531,6 +10531,12 @@ void main(){
     async function startChatSession() {
         if (!window.crypto || !window.crypto.subtle) return showToast("🔒 Browser blocked Crypto API!", 'error');
 
+        // Tagged before each major step so a failure can be reported with exactly
+        // which one it happened in -- the catch at the bottom of this function used
+        // to relabel every possible failure as an opaque "Cryptographic exception"
+        // with zero detail on where it actually came from, which made a real device-
+        // specific bug here undiagnosable from a bug report alone.
+        let currentStep = 'init';
         try {
             // Whether to show the "Admin Dashboard" entry point (see the hamburger
             // menu) -- checked fresh every session start rather than trusted from
@@ -10543,17 +10549,23 @@ void main(){
                 updateMikaChatRowVisibility();
             }).catch(() => {});
 
+            currentStep = 'loadProfileStore';
             await loadProfileStore();
             applyLoggedInProfile(myUsername, pendingProfileMergeData);
             pendingProfileMergeData = null;
             checkAutoBackup();
             applyStoredFontSize();
+            currentStep = 'loadSavedConversations';
             await loadSavedConversations();
             purgeExpiredDisappearingMessages();
+            currentStep = 'loadNearbyMatches';
             await loadNearbyMatches();
+            currentStep = 'loadStatuses';
             await loadStatuses();
+            currentStep = 'loadRemoteProfileCache';
             await loadRemoteProfileCache();
 
+            currentStep = 'keySetup';
             myDeviceId = getOrCreateDeviceId();
 
             // Fall back to the pre-rename key names if the new ones aren't there yet —
@@ -10612,7 +10624,9 @@ void main(){
                 localStorage.setItem(`hai_priv_${myUsername}`, JSON.stringify(newPrivJwk));
             }
 
+            currentStep = 'exportPublicKey';
             myExportedPublicKeyString = arrayBufferToBase64(await window.crypto.subtle.exportKey("spki", myKeyPair.publicKey));
+            currentStep = 'socketSetup';
             socket = io(); // same-origin: works at localhost:3000 and through the Cloudflare Tunnel URL alike
             primeNotificationAudio();
 
@@ -11071,14 +11085,17 @@ void main(){
                 }
             });
 
+            currentStep = 'loadFriendsData';
             await loadFriendsData();
+            currentStep = 'loadMyGroups';
             await loadMyGroups();
             renderSidebarContacts();
+            currentStep = 'joinGroupFromUrl';
             await tryJoinGroupFromUrl();
 
         } catch (e) {
-            showToast("Cryptographic exception: " + e.message, 'error');
-            console.error('startChatSession failed:', e.name, e.message);
+            showToast(`Error during login [${currentStep}]: ${e.name || 'Error'}: ${e.message}`, 'error');
+            console.error('startChatSession failed at step', currentStep, '-', e.name, e.message);
             // Never leave the user stranded on a blank screen. attemptAutoLogin's
             // session-cookie path hides #setup before calling in here and has no
             // other recovery of its own, so whatever failed above (key import,
