@@ -11040,7 +11040,19 @@ void main(){
             renderSidebarContacts();
             await tryJoinGroupFromUrl();
 
-        } catch (e) { showToast("Cryptographic exception: " + e.message, 'error'); }
+        } catch (e) {
+            showToast("Cryptographic exception: " + e.message, 'error');
+            console.error('startChatSession failed:', e.name, e.message);
+            // Never leave the user stranded on a blank screen. attemptAutoLogin's
+            // session-cookie path hides #setup before calling in here and has no
+            // other recovery of its own, so whatever failed above (key import,
+            // decrypting stored history, etc.) needs a fallback here instead --
+            // show the login form again rather than leaving #setup hidden with
+            // nothing rendered in its place.
+            const setupEl = document.getElementById('setup');
+            if (setupEl) setupEl.style.display = 'flex';
+            generateLogoWatermark('setupLogoWatermarkLayer');
+        }
     }
 
     function handleInputKeyDown(event) {
