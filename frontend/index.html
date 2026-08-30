@@ -737,7 +737,9 @@
         .chat-area.friends-aux-mode #friendsAuxView,
         .chat-area.groupinfo-aux-mode #groupInfoAuxView,
         .chat-area.status-aux-mode #statusAuxView,
-        .chat-area.hai-aux-mode #haiActionsAuxView { display: flex; }
+        .chat-area.hai-aux-mode #haiActionsAuxView,
+        .chat-area.mika-aux-mode #mikaAuxView,
+        .chat-area.mikaDenied-aux-mode #mikaDeniedAuxView { display: flex; }
 
         .friend-request-row {
             display: flex;
@@ -3858,6 +3860,53 @@
         @media (max-width: 768px) {
             .hai-actions-card { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
         }
+
+        /* ── MIKA ADMIN CHAT (MYAG-195) — pinned, admin-only, explicitly NOT E2E
+           encrypted (see mika-not-encrypted-banner below). Lives outside the normal
+           contactsContainer sort/filter/pin logic entirely: a static row above the
+           chat-filter-pills so it is always first regardless of recency, and its own
+           self-contained aux view (same pattern as haiActionsAuxView) rather than a
+           real conversationHistory entry, so it never touches switchConversationRoom/
+           buildBubbleNode/sendPrivateMessage or any crypto/key-handling code. ── */
+        .mika-chat-row {
+            display: none; align-items: center; gap: 10px; padding: 10px 12px; margin: 4px 8px 8px;
+            border-radius: 12px; cursor: pointer; background: rgba(224, 180, 0, 0.08);
+            border: 1px solid rgba(224, 180, 0, 0.22);
+        }
+        .mika-chat-row:hover { background: rgba(224, 180, 0, 0.14); }
+        .mika-chat-avatar {
+            width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+            background: var(--accent-gold, #e0b400); color: #1a1400; font-weight: 700; font-size: 16px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .mika-chat-avatar.small { width: 22px; height: 22px; font-size: 11px; }
+        .mika-chat-row .contact-item-body { flex: 1; overflow: hidden; }
+        .mika-chat-badge {
+            font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+            color: var(--accent-gold, #e0b400); border: 1px solid rgba(224, 180, 0, 0.4);
+            border-radius: 8px; padding: 1px 6px; flex-shrink: 0;
+        }
+        .mika-not-encrypted-banner {
+            display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+            color: var(--accent-gold, #e0b400); background: rgba(224, 180, 0, 0.1);
+            border: 1px solid rgba(224, 180, 0, 0.22); border-radius: 10px; padding: 8px 12px;
+            margin-bottom: 10px; flex-shrink: 0;
+        }
+        .mika-chat-card { display: flex; flex-direction: column; }
+        .mika-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .mika-input-row { display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-top: 10px; }
+        .mika-input-row input {
+            flex: 1; padding: 12px 14px; background-color: var(--input-bg);
+            border: 1px solid var(--border-color); border-radius: 12px;
+            color: var(--text-normal); font-size: 14px; font-family: var(--font-stack);
+        }
+        .mika-input-row input:disabled { opacity: 0.5; }
+        .mika-denied-body { padding: 30px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
+        .mika-error-bubble { border: 1px solid var(--accent-red); }
+        .mika-pending-bubble { opacity: 0.6; }
+        @media (max-width: 768px) {
+            .mika-chat-card, .mika-denied-card { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+        }
     </style>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
@@ -4039,6 +4088,25 @@
                 <div class="chat-search-bar">
                     <span data-icon="search"></span>
                     <input type="text" id="targetUser" placeholder="Search people, chats, settings..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" readonly onfocus="this.blur(); openUniversalSearch();">
+                </div>
+
+                <!-- MIKA — pinned, admin-only (MYAG-195). Lives above the filter pills so
+                     it is always the first thing shown in the Chats tab, unaffected by the
+                     All/Unread/Archived filter or any recency sort applied below. Hidden by
+                     default; shown only once /api/auth/me confirms isAdmin (see
+                     updateMikaChatRowVisibility). Non-dismissible: no swipe/delete/favorite
+                     actions, unlike every other row here. -->
+                <div class="mika-chat-row" id="mikaChatRow" onclick="openMikaChat()">
+                    <div class="mika-chat-avatar">M</div>
+                    <div class="contact-item-body">
+                        <div class="contact-item-top">
+                            <span class="contact-item-name">Mika</span>
+                            <span class="mika-chat-badge">Not encrypted</span>
+                        </div>
+                        <div class="contact-item-bottom">
+                            <span class="contact-item-preview">Admin-only bridge chat</span>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="chat-filter-pills">
@@ -4444,6 +4512,41 @@
                 </div>
             </div>
         </div>
+
+        <!-- MIKA CHAT (MYAG-195) — self-contained aux view, same pattern as Quick
+             Actions above: its own message list and its own composer, entirely
+             separate from #messages/.chat-input-area/sendPrivateMessage so nothing
+             here shares a code path with any real (encrypted) conversation. -->
+        <div class="chat-area-aux-view" id="mikaAuxView">
+            <div class="trash-card mika-chat-card">
+                <div class="trash-header">
+                    <h3 style="display: flex; align-items: center; gap: 8px;"><span class="mika-chat-avatar small">M</span> Mika</h3>
+                    <button type="button" class="profile-close-btn" style="position: static;" onclick="closeMikaChat()"><span data-icon="close"></span></button>
+                </div>
+                <div class="mika-not-encrypted-banner">🔓 Not end-to-end encrypted — messages are relayed to Mika in plaintext.</div>
+                <div class="mika-messages" id="mikaMessages"></div>
+                <div class="mika-input-row">
+                    <input type="text" id="mikaInput" placeholder="Message Mika…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" onkeydown="handleMikaInputKeyDown(event)">
+                    <button type="button" class="send-btn" id="mikaSendBtn" onclick="submitMikaMessage()" aria-label="Send message to Mika"><span data-icon="send"></span></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MIKA ACCESS DENIED (MYAG-195) — shown instead of mikaAuxView whenever
+             openMikaChat()'s server-side /api/auth/me check comes back non-admin
+             (e.g. a non-admin session that reaches openMikaChat via direct/manual
+             invocation rather than the pinned row, which is itself hidden for them). -->
+        <div class="chat-area-aux-view" id="mikaDeniedAuxView">
+            <div class="trash-card mika-denied-card">
+                <div class="trash-header">
+                    <h3>Mika</h3>
+                    <button type="button" class="profile-close-btn" style="position: static;" onclick="closeAuxPanel()"><span data-icon="close"></span></button>
+                </div>
+                <div class="mika-denied-body">
+                    <p>Access denied — this chat is only available to the admin account.</p>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -4809,6 +4912,12 @@
     let socket;
     let myUsername = "";
     let isAdmin = false;
+    // MIKA ADMIN CHAT (MYAG-195) — deliberately NOT part of conversationHistory: it's
+    // not E2E encrypted, isn't a real user, and must never be persisted/rendered by
+    // any of the encrypted-chat code paths. See openMikaChat() further down.
+    let mikaMessages = [];
+    let mikaRequestsLoaded = false;
+    let mikaSending = false;
     let myKeyPair;
     let myDeviceId = "";
     let myExportedPublicKeyString = "";
@@ -9127,6 +9236,145 @@ void main(){
         closeAuxPanel();
     }
 
+    /* ── MIKA ADMIN CHAT (MYAG-195) ───────────────────────────────────────────
+       Pinned, admin-only chat to the Mika/Multica bridge (backend/mika-bridge.js,
+       POST /api/admin/mika/message + GET /api/admin/mika/requests + the
+       'mika_reply' socket push registered above). Explicitly not E2E encrypted —
+       see the persistent banner in #mikaAuxView — so this deliberately never
+       touches conversationHistory, buildBubbleNode, sendPrivateMessage, or any
+       RSA-OAEP/AES-GCM code in this file. The admin gate is enforced server-side
+       by requireAdmin on every one of those endpoints; the /api/auth/me check in
+       openMikaChat below is real-time UX (so a revoked admin sees "Access denied"
+       immediately), not the actual security boundary. */
+    function updateMikaChatRowVisibility() {
+        const row = document.getElementById('mikaChatRow');
+        if (row) row.style.display = isAdmin ? 'flex' : 'none';
+    }
+
+    async function openMikaChat() {
+        let me;
+        try {
+            me = await authFetchJSON('/api/auth/me', 'GET');
+        } catch (err) {
+            return openAuxPanel('mikaDenied');
+        }
+        isAdmin = !!me.isAdmin;
+        updateMikaChatRowVisibility();
+        if (!isAdmin) return openAuxPanel('mikaDenied');
+
+        openAuxPanel('mika');
+        if (!mikaRequestsLoaded) await loadMikaHistory();
+        renderMikaMessages();
+        focusMikaInput();
+    }
+
+    function closeMikaChat() {
+        closeAuxPanel();
+    }
+
+    async function loadMikaHistory() {
+        try {
+            const data = await authFetchJSON('/api/admin/mika/requests?limit=50', 'GET');
+            mikaMessages = [];
+            (data.requests || []).slice().reverse().forEach(r => {
+                mikaMessages.push({ sender: 'You', text: r.message, timestamp: new Date(r.createdAt).getTime(), requestId: r.requestId });
+                if (r.status === 'completed' && r.reply) {
+                    mikaMessages.push({ sender: 'Mika', text: r.reply, timestamp: new Date(r.updatedAt).getTime(), requestId: r.requestId });
+                } else if ((r.status === 'timeout' || r.status === 'failed') && r.error) {
+                    mikaMessages.push({ sender: 'Mika', text: r.error, timestamp: new Date(r.updatedAt).getTime(), requestId: r.requestId, isError: true });
+                }
+                // 'pending' rows with no reply yet just show the admin's sent message —
+                // the live 'mika_reply' socket push (or a later history reload) fills it in.
+            });
+            mikaRequestsLoaded = true;
+        } catch (err) {
+            console.error('Failed to load Mika history:', err.message);
+        }
+    }
+
+    function focusMikaInput() {
+        setTimeout(() => {
+            const el = document.getElementById('mikaInput');
+            if (el && !el.disabled) el.focus();
+        }, 50);
+    }
+
+    function handleMikaInputKeyDown(event) {
+        if (event.key === 'Enter') { event.preventDefault(); submitMikaMessage(); }
+    }
+
+    async function submitMikaMessage() {
+        const input = document.getElementById('mikaInput');
+        if (!input || input.disabled || mikaSending) return;
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        mikaSending = true;
+        const sendBtn = document.getElementById('mikaSendBtn');
+        if (sendBtn) sendBtn.disabled = true;
+
+        const localMsg = { sender: 'You', text, timestamp: Date.now() };
+        mikaMessages.push(localMsg);
+        renderMikaMessages();
+
+        try {
+            const res = await authFetchJSON('/api/admin/mika/message', 'POST', { message: text });
+            localMsg.requestId = res.requestId;
+            if (res.status === 'completed' && res.reply) {
+                mikaMessages.push({ sender: 'Mika', text: res.reply, timestamp: Date.now(), requestId: res.requestId });
+                renderMikaMessages();
+            }
+            // Otherwise status is 'pending' — the reply arrives asynchronously via the
+            // 'mika_reply' socket event registered next to receive_private_message.
+        } catch (err) {
+            mikaMessages.push({ sender: 'Mika', text: err.message || 'Could not reach Mika right now.', timestamp: Date.now(), isError: true });
+            renderMikaMessages();
+        } finally {
+            mikaSending = false;
+            if (sendBtn) sendBtn.disabled = false;
+            focusMikaInput();
+        }
+    }
+
+    // Deliberately separate from buildBubbleNode: no reactions/reply/forward/pin/
+    // star/edit/delete menu (none of that applies to a system bridge chat), and
+    // msg.text is always rendered via innerText/textContent, never innerHTML.
+    function buildMikaBubbleNode(msg) {
+        const row = document.createElement('div');
+        row.classList.add('msg-row', msg.sender === 'You' ? 'user' : 'other');
+
+        const containerDiv = document.createElement('div');
+        containerDiv.className = 'msg-container';
+
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'msg' + (msg.isError ? ' mika-error-bubble' : '') + (msg.requestId ? '' : ' mika-pending-bubble');
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'msg-text';
+        const contentSpan = document.createElement('span');
+        contentSpan.className = 'msg-text-content';
+        contentSpan.innerText = msg.text;
+        textDiv.appendChild(contentSpan);
+        bubbleDiv.appendChild(textDiv);
+
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'msg-meta';
+        metaDiv.innerHTML = formatBubbleTime(msg.timestamp);
+        bubbleDiv.appendChild(metaDiv);
+
+        containerDiv.appendChild(bubbleDiv);
+        row.appendChild(containerDiv);
+        return row;
+    }
+
+    function renderMikaMessages() {
+        const container = document.getElementById('mikaMessages');
+        if (!container) return;
+        container.innerHTML = '';
+        mikaMessages.forEach(msg => container.appendChild(buildMikaBubbleNode(msg)));
+        container.scrollTop = container.scrollHeight;
+    }
+
     function resetHaiActionsState() {
         const input = document.getElementById('haiActionsInput');
         if (input) input.value = '';
@@ -10256,6 +10504,7 @@ void main(){
                 isAdmin = !!me.isAdmin;
                 const btn = document.getElementById('hamburgerAdminBtn');
                 if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
+                updateMikaChatRowVisibility();
             }).catch(() => {});
 
             await loadProfileStore();
@@ -10351,6 +10600,22 @@ void main(){
                 updateSidebarProfileAvatar();
                 renderSidebarContacts();
                 updateStatusFabState();
+            });
+
+            // MIKA ADMIN CHAT (MYAG-195) — server-pushed reply to a message sent via
+            // POST /api/admin/mika/message (see submitMikaMessage). Plain-text only,
+            // no encryption/decryption involved, unlike every other socket message
+            // handler in this file.
+            socket.on('mika_reply', (data) => {
+                if (!data) return;
+                if (data.status === 'completed' && data.reply) {
+                    mikaMessages.push({ sender: 'Mika', text: data.reply, timestamp: Date.now(), requestId: data.requestId });
+                } else if (data.error) {
+                    mikaMessages.push({ sender: 'Mika', text: data.error, timestamp: Date.now(), requestId: data.requestId, isError: true });
+                } else {
+                    return;
+                }
+                if (activeAuxPanel === 'mika') renderMikaMessages();
             });
 
             socket.on('receive_private_message', async (data) => {
@@ -15823,7 +16088,7 @@ void main(){
     /* IN-PANEL AUX VIEWS — Profile/Trash/Settings open by replacing chatPanel's normal
        content (same panel, same mobile open/close animation) instead of a floating
        modal, matching how a regular chat or Nearby match opens. */
-    const AUX_PANEL_KINDS = ['profile', 'trash', 'settings', 'friends', 'status', 'groupinfo', 'hai'];
+    const AUX_PANEL_KINDS = ['profile', 'trash', 'settings', 'friends', 'status', 'groupinfo', 'hai', 'mika', 'mikaDenied'];
     function openAuxPanel(kind) {
         const panel = document.getElementById('chatPanel');
         // Only one aux view can ever be visible at once -- switching straight from one
