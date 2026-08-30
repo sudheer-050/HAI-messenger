@@ -349,13 +349,20 @@
                             <div class="chart-canvas-wrap" id="featureUsageChartWrap"><canvas id="featureUsageCanvas"></canvas></div>
                             <div class="chart-legend" id="featureUsageLegend"></div>
                         </div>
-                        <div class="stat-tile-grid stat-tile-grid-compact" id="deliveryTiles"></div>
                     </div>
                     <div class="insights-col">
                         <div class="insights-card-header"><h3>Retention <span class="insights-subtitle">by signup cohort</span></h3></div>
                         <div class="retention-table-wrap">
                             <table class="retention-table" id="retentionTable"></table>
                         </div>
+                    </div>
+                </div>
+
+                <div class="insights-row">
+                    <div class="insights-col">
+                        <div class="insights-card-header"><h3>Technical Health <span class="insights-subtitle">message delivery, last 30 days</span></h3></div>
+                        <div class="stat-tile-grid stat-tile-grid-compact" id="deliveryTiles"></div>
+                        <div class="note-banner" id="technicalHealthGaps" style="margin-top:10px;"></div>
                     </div>
                 </div>
             </div>
@@ -613,6 +620,14 @@
                     <div class="stat-value">${typeof t.value === 'number' ? t.value.toLocaleString() : t.value}</div>
                     <div class="stat-label">${t.label}</div>
                 </div>`).join('');
+
+            const gapsEl = document.getElementById('technicalHealthGaps');
+            if (Array.isArray(f.technicalHealthGaps) && f.technicalHealthGaps.length) {
+                gapsEl.innerHTML = 'Not available without new instrumentation: ' +
+                    f.technicalHealthGaps.map(g => g.split(':')[0].replace(/_/g, ' ')).join(', ') + '.';
+            } else {
+                gapsEl.style.display = 'none';
+            }
         } catch (err) {
             console.error('feature-usage load failed:', err.message);
         }
