@@ -10537,21 +10537,36 @@ void main(){
                 }
             }
 
+            let keyImportFailed = false;
             if (storedPubKey && storedPrivKey) {
-                // Safari/WebKit throws OperationError if the JWK's alg or key_ops
-                // field doesn't exactly match the importKey algorithm params/usages,
-                // even when Chrome silently accepts the mismatch. Both fields are
-                // optional per RFC 7517 — the importKey call is the authoritative
-                // source for algorithm constraints — so strip them before import.
-                const pubJwk = JSON.parse(storedPubKey);
-                const privJwk = JSON.parse(storedPrivKey);
-                delete pubJwk.alg; delete pubJwk.key_ops;
-                delete privJwk.alg; delete privJwk.key_ops;
-                myKeyPair = {
-                    publicKey: await window.crypto.subtle.importKey("jwk", pubJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]),
-                    privateKey: await window.crypto.subtle.importKey("jwk", privJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["decrypt"])
-                };
-            } else {
+                try {
+                    // Safari/WebKit throws OperationError if the JWK's alg or key_ops
+                    // field doesn't exactly match the importKey algorithm params/usages,
+                    // even when Chrome silently accepts the mismatch. Both fields are
+                    // optional per RFC 7517 — the importKey call is the authoritative
+                    // source for algorithm constraints — so strip them before import.
+                    const pubJwk = JSON.parse(storedPubKey);
+                    const privJwk = JSON.parse(storedPrivKey);
+                    delete pubJwk.alg; delete pubJwk.key_ops;
+                    delete privJwk.alg; delete privJwk.key_ops;
+                    myKeyPair = {
+                        publicKey: await window.crypto.subtle.importKey("jwk", pubJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]),
+                        privateKey: await window.crypto.subtle.importKey("jwk", privJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["decrypt"])
+                    };
+                } catch (keyImportErr) {
+                    // WebKit (every iOS browser, since Apple mandates its engine) is
+                    // stricter than Chrome/V8 about RSA JWK import and can throw a
+                    // generic OperationError for a subset of otherwise-valid keys
+                    // beyond the alg/key_ops mismatch stripped above. The outer catch
+                    // around login relabels everything "Cryptographic exception" with
+                    // no detail, so log the real error here, then fall through to
+                    // regenerating a fresh keypair below instead of leaving the user
+                    // permanently unable to log in on this device.
+                    console.error('Stored key import failed, regenerating a fresh keypair:', keyImportErr.name, keyImportErr.message);
+                    keyImportFailed = true;
+                }
+            }
+            if (!storedPubKey || !storedPrivKey || keyImportFailed) {
                 myKeyPair = await window.crypto.subtle.generateKey({ name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["encrypt", "decrypt"]);
                 const newPubJwk = await window.crypto.subtle.exportKey("jwk", myKeyPair.publicKey);
                 const newPrivJwk = await window.crypto.subtle.exportKey("jwk", myKeyPair.privateKey);
