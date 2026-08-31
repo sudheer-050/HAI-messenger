@@ -1,4 +1,16 @@
 services:
+  local-proxy:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./local-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
   postgres:
     image: postgres:15
     restart: unless-stopped
@@ -38,6 +50,11 @@ services:
       - ./backend:/usr/src/app
       - ./frontend:/usr/src/app/public   # 🌟 ADD THIS EXACT MOUNT LINE
       - /usr/src/app/node_modules
+      # Read-only: lets the container's multica CLI authenticate as this PC's
+      # own already-logged-in Multica session instead of needing separate
+      # container credentials. :ro so the container's CLI invocations can't
+      # write into and disturb this PC's live daemon state (daemon.pid, logs).
+      - C:/Users/gsudh/.multica:/root/.multica:ro
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379

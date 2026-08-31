@@ -18,6 +18,7 @@ const cookieParser = require('cookie-parser');
 const { rateLimit } = require('express-rate-limit');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
+const { createTtsService } = require('./tts');
 const {
     loadMikaConfig, isMikaConfigured, computeContentHash, buildIssueTitle, selectMikaReply,
 } = require('./mika-bridge');
@@ -1213,6 +1214,46 @@ async function getHReplyContent(messages) {
 
     throw new Error('No H AI provider available (Ollama unreachable, Gemini not configured)');
 }
+
+// TTS -- backs both the H AI voice assistant (frontend/h.html) and Mika chat's
+// voice mode. tts.js already existed with real logic + tests but was never
+// actually mounted here, so /api/tts calls from the frontend were 404ing;
+// this wires it in. generate() writes the synthesized audio to disk and
+// returns a { url: '/api/h-audio/<file>.mp3' } pointer (not inline base64),
+// so playback is a normal GET against /api/h-audio/:filename below.
+const ttsService = createTtsService();
+ttsService.init().catch(err => console.error('TTS service init failed:', err.message));
+
+app.post('/api/tts', requireAuth, async (req, res) => {
+    const { text, emotion } = req.body || {};
+    if (typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ error: 'Text is required.' });
+    }
+    try {
+        const result = await ttsService.generate(text, { clientKey: req.username, emotion });
+        res.json(result);
+    } catch (err) {
+        console.error('TTS generation failed:', err.message);
+        res.status(502).json({ status: 'error', error: 'Voice synthesis is temporarily unavailable.' });
+    }
+});
+
+// Unauthenticated on purpose: the filename is an unguessable random UUID
+// (crypto.randomUUID(), see tts.js), the same "possession of the URL is the
+// access control" pattern already used elsewhere in this app for attachment
+// downloads -- and <audio src="..."> playback doesn't reliably forward
+// cookies/auth headers across every browser anyway.
+app.get('/api/h-audio/:filename', async (req, res) => {
+    try {
+        const resolved = await ttsService.resolveAudioFile(req.params.filename);
+        if (!resolved) return res.status(404).end();
+        res.type(resolved.mimeType);
+        fs.createReadStream(resolved.filePath).pipe(res);
+    } catch (err) {
+        console.error('TTS audio fetch failed:', err.message);
+        res.status(500).end();
+    }
+});
 
 app.post('/api/h-chat', ipLimitHChat, async (req, res) => {
     const { message, history, glossary } = req.body || {};
@@ -2770,8 +2811,16 @@ async function runMultica(subArgs, timeoutMs) {
 // Creates a child issue in the allowlisted project assigned to Mika, then
 // re-fetches it to confirm it actually landed where it was asked to before
 // the caller ever polls it for a reply.
+// Multica's CLI rejects --description-file paths outside its own working
+// directory (MUL-4252: stops a stale file from another run/environment being
+// read by mistake), so this can't use os.tmpdir() (/tmp) -- the temp file has
+// to live inside the app's own cwd instead, same directory runMultica's CLI
+// invocation runs from.
+const MIKA_TMP_DIR = path.join(__dirname, '.mika-tmp');
+
 async function createMikaBridgeIssue(correlationId, adminMessage) {
-    const tmpPath = path.join(os.tmpdir(), `mika-bridge-${correlationId}-${crypto.randomBytes(4).toString('hex')}.md`);
+    await fsp.mkdir(MIKA_TMP_DIR, { recursive: true });
+    const tmpPath = path.join(MIKA_TMP_DIR, `mika-bridge-${correlationId}-${crypto.randomBytes(4).toString('hex')}.md`);
     await fsp.writeFile(tmpPath, adminMessage, 'utf8');
     try {
         const createOut = await runMultica([

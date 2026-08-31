@@ -3904,6 +3904,26 @@
         .mika-denied-body { padding: 30px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
         .mika-error-bubble { border: 1px solid var(--accent-red); }
         .mika-pending-bubble { opacity: 0.6; }
+        /* "Mika is thinking…" bubble, shown from send until her reply arrives
+           (backend polling can take up to MIKA_REPLY_TIMEOUT_MS = 90s) -- reuses
+           the same typing-dot bounce animation as the regular contact-chat
+           header typing indicator, just sized/spaced for a message bubble. */
+        .mika-thinking-bubble { display: flex; align-items: center; gap: 4px; padding: 12px 14px; }
+        .mika-thinking-bubble .typing-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            animation: typingDotBounce 1.1s ease-in-out infinite;
+        }
+        .mika-thinking-bubble .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+        .mika-thinking-bubble .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+        /* Voice mode toggle -- same "mic" icon in both states, active state is
+           communicated by color/background rather than swapping icon shape
+           (no dedicated mic-off glyph exists in this app's icon set). */
+        #mikaVoiceModeBtn.active { background: var(--accent-brand); color: #fff; }
+        #mikaMicBtn.recording { background: var(--accent-red); color: #fff; animation: typingDotBounce 1s ease-in-out infinite; }
+        .mika-voice-status { font-size: 12px; color: var(--text-muted); padding: 2px 4px 6px; text-align: center; min-height: 16px; }
         @media (max-width: 768px) {
             .mika-chat-card, .mika-denied-card { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
         }
@@ -4522,11 +4542,16 @@
             <div class="trash-card mika-chat-card">
                 <div class="trash-header">
                     <h3 style="display: flex; align-items: center; gap: 8px;"><span class="mika-chat-avatar small">M</span> Mika</h3>
-                    <button type="button" class="profile-close-btn" style="position: static;" onclick="closeMikaChat()"><span data-icon="close"></span></button>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <button type="button" class="profile-close-btn" id="mikaVoiceModeBtn" style="position: static;" onclick="toggleMikaVoiceMode()" aria-label="Toggle voice mode" aria-pressed="false" title="Talk to Mika instead of typing"><span data-icon="mic"></span></button>
+                        <button type="button" class="profile-close-btn" style="position: static;" onclick="closeMikaChat()"><span data-icon="close"></span></button>
+                    </div>
                 </div>
                 <div class="mika-not-encrypted-banner">🔓 Not end-to-end encrypted — messages are relayed to Mika in plaintext.</div>
                 <div class="mika-messages" id="mikaMessages"></div>
+                <div class="mika-voice-status" id="mikaVoiceStatus" style="display: none;"></div>
                 <div class="mika-input-row">
+                    <button type="button" class="send-btn" id="mikaMicBtn" style="display: none;" onclick="startMikaVoiceInput()" aria-label="Speak your message to Mika"><span data-icon="mic"></span></button>
                     <input type="text" id="mikaInput" placeholder="Message Mika…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" onkeydown="handleMikaInputKeyDown(event)">
                     <button type="button" class="send-btn" id="mikaSendBtn" onclick="submitMikaMessage()" aria-label="Send message to Mika"><span data-icon="send"></span></button>
                 </div>
@@ -4919,6 +4944,19 @@
     let mikaMessages = [];
     let mikaRequestsLoaded = false;
     let mikaSending = false;
+    // True from the moment a message is sent until Mika's reply lands (either
+    // synchronously in submitMikaMessage's response, or later via the
+    // 'mika_reply' socket push) -- drives the "Mika is thinking…" bubble in
+    // renderMikaMessages so a 90s wait (see MIKA_REPLY_TIMEOUT_MS server-side)
+    // doesn't look like the message vanished into nothing.
+    let mikaWaitingForReply = false;
+    // Voice mode: off by default (existing text-only behavior unchanged). When on,
+    // a mic button appears for push-to-talk speech-to-text input, and Mika's
+    // replies are spoken back via the /api/tts + /api/h-audio pipeline (same
+    // self-hosted Kokoro TTS the H AI voice assistant uses).
+    let mikaVoiceMode = false;
+    let mikaRecognition = null;
+    const mikaVoiceAudio = new Audio(); // reused across replies so a new one interrupts any still-playing previous reply
     let myKeyPair;
     let myDeviceId = "";
     let myExportedPublicKeyString = "";
@@ -9270,6 +9308,8 @@ void main(){
     }
 
     function closeMikaChat() {
+        stopMikaVoiceInput();
+        mikaVoiceAudio.pause();
         closeAuxPanel();
     }
 
@@ -9304,6 +9344,104 @@ void main(){
         if (event.key === 'Enter') { event.preventDefault(); submitMikaMessage(); }
     }
 
+    function setMikaVoiceStatus(text) {
+        const el = document.getElementById('mikaVoiceStatus');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.display = text ? '' : 'none';
+    }
+
+    function toggleMikaVoiceMode() {
+        mikaVoiceMode = !mikaVoiceMode;
+        const toggleBtn = document.getElementById('mikaVoiceModeBtn');
+        const micBtn = document.getElementById('mikaMicBtn');
+        if (toggleBtn) {
+            toggleBtn.classList.toggle('active', mikaVoiceMode);
+            toggleBtn.setAttribute('aria-pressed', String(mikaVoiceMode));
+            toggleBtn.title = mikaVoiceMode ? 'Voice mode on -- tap to switch back to typing' : 'Talk to Mika instead of typing';
+        }
+        if (micBtn) micBtn.style.display = mikaVoiceMode ? '' : 'none';
+        if (!mikaVoiceMode) {
+            stopMikaVoiceInput();
+            mikaVoiceAudio.pause();
+            setMikaVoiceStatus('');
+        }
+    }
+
+    function stopMikaVoiceInput() {
+        if (mikaRecognition) {
+            try { mikaRecognition.onresult = null; mikaRecognition.onerror = null; mikaRecognition.onend = null; mikaRecognition.abort(); } catch (e) {}
+            mikaRecognition = null;
+        }
+        const micBtn = document.getElementById('mikaMicBtn');
+        if (micBtn) micBtn.classList.remove('recording');
+    }
+
+    // Push-to-talk: one tap starts listening, the recognizer auto-stops on its
+    // own silence/final-result detection (see recognition.onend below) and the
+    // transcribed text is auto-submitted -- no second tap needed to send.
+    function startMikaVoiceInput() {
+        if (mikaRecognition) { stopMikaVoiceInput(); return; } // tap again to cancel
+        const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionCtor) {
+            setMikaVoiceStatus('Voice input needs Chrome, Edge, or another Web Speech-capable browser.');
+            return;
+        }
+        mikaVoiceAudio.pause(); // don't let Mika's own TTS bleed into the mic
+        const recognition = new SpeechRecognitionCtor();
+        recognition.lang = document.documentElement.lang || 'en-US';
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+        mikaRecognition = recognition;
+        document.getElementById('mikaMicBtn')?.classList.add('recording');
+        setMikaVoiceStatus('Listening…');
+
+        let finalTranscript = '';
+        recognition.onresult = (e) => {
+            let interim = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
+                else interim += e.results[i][0].transcript;
+            }
+            setMikaVoiceStatus((finalTranscript + interim).trim() || 'Listening…');
+            if (finalTranscript) { try { recognition.stop(); } catch (err) {} }
+        };
+        recognition.onerror = (e) => {
+            if (mikaRecognition !== recognition) return;
+            setMikaVoiceStatus(e.error === 'not-allowed' ? 'Microphone access denied.' : 'Could not hear you -- tap the mic to try again.');
+            mikaRecognition = null;
+            document.getElementById('mikaMicBtn')?.classList.remove('recording');
+        };
+        recognition.onend = () => {
+            if (mikaRecognition !== recognition) return; // superseded/cancelled
+            mikaRecognition = null;
+            document.getElementById('mikaMicBtn')?.classList.remove('recording');
+            const text = finalTranscript.trim();
+            if (!text) { setMikaVoiceStatus(''); return; }
+            const input = document.getElementById('mikaInput');
+            if (input) input.value = text;
+            setMikaVoiceStatus('');
+            submitMikaMessage();
+        };
+        try { recognition.start(); } catch (e) { mikaRecognition = null; }
+    }
+
+    // Speaks a Mika reply aloud via the self-hosted Kokoro TTS pipeline
+    // (backend/tts.js -> /api/tts -> /api/h-audio/:filename). Silently does
+    // nothing on failure/rate-limit -- the text reply is already shown in the
+    // chat either way, voice is a bonus, never a blocker.
+    async function speakMikaReply(text) {
+        if (!mikaVoiceMode || !text) return;
+        try {
+            const result = await authFetchJSON('/api/tts', 'POST', { text, emotion: 'neutral' });
+            if (result.status !== 'ready' || !result.url) return;
+            mikaVoiceAudio.src = result.url;
+            await mikaVoiceAudio.play();
+        } catch (err) {
+            // Voice is best-effort; the text bubble already has the reply.
+        }
+    }
+
     async function submitMikaMessage() {
         const input = document.getElementById('mikaInput');
         if (!input || input.disabled || mikaSending) return;
@@ -9316,18 +9454,23 @@ void main(){
 
         const localMsg = { sender: 'You', text, timestamp: Date.now() };
         mikaMessages.push(localMsg);
+        mikaWaitingForReply = true;
         renderMikaMessages();
 
         try {
             const res = await authFetchJSON('/api/admin/mika/message', 'POST', { message: text });
             localMsg.requestId = res.requestId;
             if (res.status === 'completed' && res.reply) {
+                mikaWaitingForReply = false;
                 mikaMessages.push({ sender: 'Mika', text: res.reply, timestamp: Date.now(), requestId: res.requestId });
                 renderMikaMessages();
+                speakMikaReply(res.reply);
             }
-            // Otherwise status is 'pending' — the reply arrives asynchronously via the
-            // 'mika_reply' socket event registered next to receive_private_message.
+            // Otherwise status is 'pending' — mikaWaitingForReply stays true and the
+            // thinking bubble keeps showing until the reply arrives asynchronously via
+            // the 'mika_reply' socket event registered next to receive_private_message.
         } catch (err) {
+            mikaWaitingForReply = false;
             mikaMessages.push({ sender: 'Mika', text: err.message || 'Could not reach Mika right now.', timestamp: Date.now(), isError: true });
             renderMikaMessages();
         } finally {
@@ -9368,11 +9511,25 @@ void main(){
         return row;
     }
 
+    function buildMikaThinkingNode() {
+        const row = document.createElement('div');
+        row.className = 'msg-row other';
+        const containerDiv = document.createElement('div');
+        containerDiv.className = 'msg-container';
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'msg mika-thinking-bubble';
+        bubbleDiv.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+        containerDiv.appendChild(bubbleDiv);
+        row.appendChild(containerDiv);
+        return row;
+    }
+
     function renderMikaMessages() {
         const container = document.getElementById('mikaMessages');
         if (!container) return;
         container.innerHTML = '';
         mikaMessages.forEach(msg => container.appendChild(buildMikaBubbleNode(msg)));
+        if (mikaWaitingForReply) container.appendChild(buildMikaThinkingNode());
         container.scrollTop = container.scrollHeight;
     }
 
@@ -10674,8 +10831,11 @@ void main(){
             socket.on('mika_reply', (data) => {
                 if (!data) return;
                 if (data.status === 'completed' && data.reply) {
+                    mikaWaitingForReply = false;
                     mikaMessages.push({ sender: 'Mika', text: data.reply, timestamp: Date.now(), requestId: data.requestId });
+                    speakMikaReply(data.reply);
                 } else if (data.error) {
+                    mikaWaitingForReply = false;
                     mikaMessages.push({ sender: 'Mika', text: data.error, timestamp: Date.now(), requestId: data.requestId, isError: true });
                 } else {
                     return;
