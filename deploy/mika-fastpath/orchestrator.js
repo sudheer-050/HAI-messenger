@@ -45,6 +45,37 @@ function runScript(scriptPath, args, envExtra) {
     });
 }
 
+// Rollback is only ever reported as successful once a fresh post-rollback
+// health check has actually passed -- a clean `rollback.sh` exit code only
+// proves the script ran, not that the restored service works (MYAG-204).
+async function attemptRollback({ dryRun, baseUrl }) {
+    if (dryRun) {
+        return { outcome: 'rolled_back', rollbackHealth: { healthy: true, results: [] }, rollbackError: null };
+    }
+    try {
+        runScript(path.join(__dirname, 'rollback.sh'), []);
+    } catch (rollbackErr) {
+        return { outcome: 'rollback_failed', rollbackHealth: null, rollbackError: rollbackErr.message };
+    }
+    const rollbackHealth = await runHealthChecks(baseUrl);
+    if (rollbackHealth.healthy) {
+        return { outcome: 'rolled_back', rollbackHealth, rollbackError: null };
+    }
+    return { outcome: 'rollback_unverified', rollbackHealth, rollbackError: null };
+}
+
+// rejected/deployed keep their existing exit codes; the rollback outcomes
+// each get their own so callers (CI, the Mika bridge) can tell "restored and
+// confirmed" apart from "restoration unverified" or "rollback itself failed"
+// instead of collapsing all three into a single non-zero exit.
+const EXIT_CODES = {
+    deployed: 0,
+    rejected: 1,
+    rolled_back: 1,
+    rollback_unverified: 4,
+    rollback_failed: 5,
+};
+
 async function main() {
     const args = require('util').parseArgs({
         options: {
@@ -108,32 +139,29 @@ async function main() {
 
     let deployError = null;
     let healthResult = null;
+    let rollbackHealth = null;
+    let rollbackError = null;
     let outcome = 'deployed';
+    const baseUrl = args['target-base-url'] || 'http://127.0.0.1:3000';
 
     try {
         if (!args['dry-run']) {
             runScript(path.join(__dirname, 'deploy.sh'), []);
         }
-        const baseUrl = args['target-base-url'] || 'http://127.0.0.1:3000';
         healthResult = args['dry-run'] ? { healthy: true, results: [] } : await runHealthChecks(baseUrl);
 
         if (!healthResult.healthy) {
-            outcome = 'rolled_back';
-            if (!args['dry-run']) {
-                runScript(path.join(__dirname, 'rollback.sh'), []);
-                healthResult = await runHealthChecks(baseUrl);
-            }
+            const rollback = await attemptRollback({ dryRun: args['dry-run'], baseUrl });
+            outcome = rollback.outcome;
+            rollbackHealth = rollback.rollbackHealth;
+            rollbackError = rollback.rollbackError;
         }
     } catch (err) {
         deployError = err.message;
-        outcome = 'rolled_back';
-        if (!args['dry-run']) {
-            try {
-                runScript(path.join(__dirname, 'rollback.sh'), []);
-            } catch (rollbackErr) {
-                deployError += ` | rollback also failed: ${rollbackErr.message}`;
-            }
-        }
+        const rollback = await attemptRollback({ dryRun: args['dry-run'], baseUrl });
+        outcome = rollback.outcome;
+        rollbackHealth = rollback.rollbackHealth;
+        rollbackError = rollback.rollbackError;
     }
 
     const body = formatAuditComment({
@@ -142,12 +170,14 @@ async function main() {
         adminRequestSummary: args['admin-request'],
         changedFiles,
         healthCheck: healthResult,
+        rollbackHealthCheck: rollbackHealth,
+        rollbackError,
         error: deployError,
     });
     if (!args['dry-run']) await postAuditComment({ issueId, body });
     else console.log(body);
 
-    process.exit(outcome === 'deployed' ? 0 : 1);
+    process.exit(EXIT_CODES[outcome] ?? 1);
 }
 
 main().catch(err => {

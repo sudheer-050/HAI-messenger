@@ -17,18 +17,22 @@ const os = require('os');
 const path = require('path');
 
 function formatAuditComment({
-    outcome, // 'deployed' | 'rolled_back' | 'rejected'
+    outcome, // 'deployed' | 'rolled_back' | 'rollback_unverified' | 'rollback_failed' | 'rejected'
     correlationId,
     adminRequestSummary,
     changedFiles = [],
     blockedFiles = [],
     healthCheck = null,
+    rollbackHealthCheck = null,
+    rollbackError = null,
     error = null,
 }) {
     const lines = [];
     const headline = {
         deployed: 'Fast-path deploy succeeded',
-        rolled_back: 'Fast-path deploy failed health check -- rolled back',
+        rolled_back: 'Fast-path deploy failed health check -- rolled back and restoration verified',
+        rollback_unverified: 'Fast-path deploy failed health check -- rollback ran but restoration is UNVERIFIED',
+        rollback_failed: 'Fast-path deploy failed health check -- rollback itself FAILED',
         rejected: 'Fast-path rejected -- routed to normal review',
     }[outcome] || `Fast-path result: ${outcome}`;
 
@@ -59,16 +63,40 @@ function formatAuditComment({
         }
     }
 
-    if (outcome === 'rolled_back') {
+    if (outcome === 'rolled_back' || outcome === 'rollback_unverified' || outcome === 'rollback_failed') {
         lines.push('');
-        lines.push('**Health check:** failed post-deploy -- automatic rollback to the last known-good version was performed.');
+        lines.push('**Health check:** failed post-deploy -- automatic rollback to the last known-good version was attempted.');
         if (healthCheck) {
             for (const r of healthCheck.results) {
                 lines.push(`- ${r.name} (\`${r.path}\`): ${r.ok ? 'ok' : `FAILED (${r.detail || 'no detail'})`}`);
             }
         }
+    }
+
+    if (outcome === 'rolled_back') {
         lines.push('');
-        lines.push('The prior working deployment has been restored.');
+        lines.push('**Post-rollback health check:** passed. The prior working deployment has been restored and this was verified, not assumed.');
+        if (rollbackHealthCheck) {
+            for (const r of rollbackHealthCheck.results) {
+                lines.push(`- ${r.name} (\`${r.path}\`): ${r.ok ? 'ok' : `FAILED (${r.detail || 'no detail'})`}`);
+            }
+        }
+    }
+
+    if (outcome === 'rollback_unverified') {
+        lines.push('');
+        lines.push('**Post-rollback health check:** ALSO FAILED. `rollback.sh` reported success, but the restored service is not actually healthy -- restoration could NOT be verified. Do not assume the prior working version is serving traffic. Manual intervention required.');
+        if (rollbackHealthCheck) {
+            for (const r of rollbackHealthCheck.results) {
+                lines.push(`- ${r.name} (\`${r.path}\`): ${r.ok ? 'ok' : `FAILED (${r.detail || 'no detail'})`}`);
+            }
+        }
+    }
+
+    if (outcome === 'rollback_failed') {
+        lines.push('');
+        lines.push('**Rollback:** `rollback.sh` itself failed -- no restoration was performed. The broken deploy may still be live. Manual intervention required immediately.');
+        if (rollbackError) lines.push(`- rollback error: ${rollbackError}`);
     }
 
     if (error) {

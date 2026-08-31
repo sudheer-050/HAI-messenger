@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Fake `docker` CLI for the orchestrator e2e test (MYAG-204).
+#
+# Stands in for the real docker daemon so deploy.sh/rollback.sh run with
+# their REAL bash logic (tagging, build/up sequencing, the running-state
+# poll loop) instead of being bypassed like the ProcessDeployer test double
+# was. It backs "images" with a real backgrounded fake-service.js process so
+# health-check.js is exercising a real HTTP server, not a stub.
+#
+# This is still not a substitute for running deploy.sh/rollback.sh against a
+# real docker daemon (see README.md) -- it only proves the orchestration
+# logic (deploy -> health-check -> rollback -> re-check -> honest reporting)
+# is correct, not that the actual `docker compose build`/`up` invocations are.
+set -euo pipefail
+
+STATE="${FAKE_DOCKER_STATE:?FAKE_DOCKER_STATE must be set}"
+PORT="${FAKE_DOCKER_PORT:?FAKE_DOCKER_PORT must be set}"
+FAKE_SERVICE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/fake-service.js"
+mkdir -p "$STATE"
+
+current_id_file="$STATE/current_image_id"
+current_pid_file="$STATE/current_pid"
+current_mode_file="$STATE/current_mode"
+last_good_file="$STATE/last_good_image_id"
+pending_id_file="$STATE/pending_image_id"
+pending_mode_file="$STATE/pending_mode"
+counter_file="$STATE/counter"
+images_db="$STATE/images.db"
+
+next_counter() {
+    local c=0
+    [ -f "$counter_file" ] && c="$(cat "$counter_file")"
+    c=$((c + 1))
+    echo "$c" > "$counter_file"
+    echo "$c"
+}
+
+mode_for_id() {
+    local id="$1"
+    [ -f "$images_db" ] || return 0
+    grep -F "$id " "$images_db" 2>/dev/null | tail -1 | awk '{print $2}'
+}
+
+stop_container() {
+    if [ -f "$current_pid_file" ]; then
+        local pid
+        pid="$(cat "$current_pid_file")"
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            for _ in $(seq 1 20); do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 0.1
+            done
+        fi
+        rm -f "$current_pid_file"
+    fi
+}
+
+start_container() {
+    local mode="$1" id="$2"
+    stop_container
+    (MODE="$mode" PORT="$PORT" node "$FAKE_SERVICE" > "$STATE/service.log" 2>&1 &
+     echo $! > "$current_pid_file")
+    echo "$id" > "$current_id_file"
+    echo "$mode" > "$current_mode_file"
+    for _ in $(seq 1 50); do
+        if curl -sf "http://127.0.0.1:$PORT/" > /dev/null 2>&1; then
+            break
+        fi
+        sleep 0.1
+    done
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    compose)
+        sub="${1:-}"
+        shift || true
+        case "$sub" in
+            images)
+                cat "$current_id_file" 2>/dev/null || true
+                ;;
+            build)
+                mode="${FAKE_DOCKER_NEXT_BUILD_MODE:-good}"
+                id="build-${mode}-$(next_counter)"
+                echo "$id $mode" >> "$images_db"
+                echo "$id" > "$pending_id_file"
+                echo "$mode" > "$pending_mode_file"
+                ;;
+            up)
+                no_build=0
+                for a in "$@"; do
+                    [ "$a" = "--no-build" ] && no_build=1
+                done
+                if [ "$no_build" = "1" ]; then
+                    id="$(cat "$last_good_file" 2>/dev/null || true)"
+                    mode="$(mode_for_id "$id")"
+                    if [ "${FAKE_DOCKER_ROLLBACK_STAYS_BROKEN:-0}" = "1" ]; then
+                        mode="broken"
+                    fi
+                    start_container "${mode:-good}" "${id:-unknown}"
+                else
+                    id="$(cat "$pending_id_file" 2>/dev/null || true)"
+                    mode="$(cat "$pending_mode_file" 2>/dev/null || true)"
+                    if [ -z "$id" ]; then
+                        id="$(cat "$current_id_file" 2>/dev/null || true)"
+                        mode="$(cat "$current_mode_file" 2>/dev/null || true)"
+                    fi
+                    start_container "${mode:-good}" "${id:-unknown}"
+                    rm -f "$pending_id_file" "$pending_mode_file"
+                fi
+                ;;
+            ps)
+                if [ -f "$current_pid_file" ] && kill -0 "$(cat "$current_pid_file")" 2>/dev/null; then
+                    echo "fakecontainer"
+                fi
+                ;;
+        esac
+        ;;
+    tag)
+        src="${1:-}"; dest="${2:-}"
+        case "$dest" in
+            *:last-good) echo "$src" > "$last_good_file" ;;
+            *) : ;;
+        esac
+        ;;
+    inspect)
+        if [ "${1:-}" = "-f" ]; then
+            if [ -f "$current_pid_file" ] && kill -0 "$(cat "$current_pid_file")" 2>/dev/null; then
+                echo "running"
+                exit 0
+            fi
+            exit 1
+        fi
+        ;;
+    image)
+        sub="${1:-}"
+        shift || true
+        if [ "$sub" = "inspect" ]; then
+            tag="${1:-}"
+            case "$tag" in
+                *:last-good)
+                    [ -s "$last_good_file" ] && exit 0 || exit 1
+                    ;;
+                *) exit 1 ;;
+            esac
+        fi
+        ;;
+    *)
+        exit 1
+        ;;
+esac

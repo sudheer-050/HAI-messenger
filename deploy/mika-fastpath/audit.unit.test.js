@@ -36,7 +36,7 @@ test('deployed outcome reports passing health check results', () => {
     assert.match(body, /Health check.*passed/s);
 });
 
-test('rolled_back outcome reports the failing check and confirms restoration', () => {
+test('rolled_back outcome reports the failing check and confirms restoration only once the post-rollback check passed', () => {
     const body = formatAuditComment({
         outcome: 'rolled_back',
         correlationId: 'ghi789',
@@ -45,10 +45,48 @@ test('rolled_back outcome reports the failing check and confirms restoration', (
             healthy: false,
             results: [{ name: 'theme api', path: '/api/theme', ok: false, detail: 'expected 200, got 500' }],
         },
+        rollbackHealthCheck: {
+            healthy: true,
+            results: [{ name: 'theme api', path: '/api/theme', ok: true }],
+        },
     });
     assert.match(body, /rolled back/);
     assert.match(body, /FAILED \(expected 200, got 500\)/);
-    assert.match(body, /prior working deployment has been restored/);
+    assert.match(body, /restored and this was verified/);
+});
+
+test('rollback_unverified outcome never claims restoration', () => {
+    const body = formatAuditComment({
+        outcome: 'rollback_unverified',
+        correlationId: 'jkl012',
+        adminRequestSummary: 'Change theme default',
+        healthCheck: {
+            healthy: false,
+            results: [{ name: 'theme api', path: '/api/theme', ok: false, detail: 'expected 200, got 500' }],
+        },
+        rollbackHealthCheck: {
+            healthy: false,
+            results: [{ name: 'theme api', path: '/api/theme', ok: false, detail: 'expected 200, got 500' }],
+        },
+    });
+    assert.match(body, /UNVERIFIED/);
+    assert.match(body, /Manual intervention required/);
+    assert.doesNotMatch(body, /prior working deployment has been restored/);
+    assert.doesNotMatch(body, /restored and this was verified/);
+});
+
+test('rollback_failed outcome reports the rollback error and never claims restoration', () => {
+    const body = formatAuditComment({
+        outcome: 'rollback_failed',
+        correlationId: 'mno345',
+        adminRequestSummary: 'Change theme default',
+        healthCheck: { healthy: false, results: [] },
+        rollbackError: 'no hurricane-backend:last-good image found -- cannot roll back',
+    });
+    assert.match(body, /rollback itself FAILED/);
+    assert.match(body, /no hurricane-backend:last-good image found/);
+    assert.match(body, /Manual intervention required immediately/);
+    assert.doesNotMatch(body, /has been restored/);
 });
 
 test('includes the correlation id and admin request summary for traceability', () => {
