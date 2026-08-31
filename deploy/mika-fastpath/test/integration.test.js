@@ -33,7 +33,7 @@ const PORT = 4123 + Math.floor(Math.random() * 1000);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 test('scenario (a): a routine change clears the carve-out and a good deploy is healthy', async (t) => {
-    const carveOut = checkCarveOut(['frontend/admin.html', 'docker-compose.yml']);
+    const carveOut = checkCarveOut(['frontend/admin.html', 'README.md']);
     assert.equal(carveOut.allowed, true);
 
     const deployer = new ProcessDeployer(PORT);
@@ -53,7 +53,7 @@ test('scenario (b): a carved-out change is rejected before any deploy happens', 
     const before = await runHealthChecks(`http://127.0.0.1:${PORT + 1}`, { retries: 0 });
     assert.equal(before.healthy, true);
 
-    const carveOut = checkCarveOut(['backend/server.js', 'docker-compose.yml']);
+    const carveOut = checkCarveOut(['backend/server.js', 'README.md']);
     assert.equal(carveOut.allowed, false);
     assert.deepEqual(carveOut.blockedFiles, ['backend/server.js']);
 

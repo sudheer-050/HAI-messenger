@@ -20,10 +20,11 @@ workflow — it does nothing sitting here.
 
 | File | Role |
 |---|---|
-| `carve-out.js` | Deterministic path-based denylist check. Whole files are blocked (`backend/server.js`, `frontend/index.html`, `.env`, `.env.example`, `cloudflared/**`) rather than "the crypto lines within them" — see the comment in the file for why a sub-file heuristic was rejected. |
+| `carve-out.js` | Deterministic path-based denylist check. Whole files/directories are blocked (`backend/server.js`, `frontend/index.html`, `.env`, `.env.example`, `cloudflared/**`, `docker-compose.yml`, `backend/Dockerfile`, `deploy/**`, `.github/**`) rather than "the crypto lines within them" — see the comment in the file for why a sub-file heuristic was rejected, and why the build/deploy control surface (Dockerfile, compose file, this pipeline's own code) is denylisted alongside the files that hold secrets directly (MYAG-203). |
+| `changed-files.js` | Builds the changed-file list `carve-out.js` checks, from `git diff --name-status -M -C` rather than `--name-only` — the latter drops the pre-rename path of a rename entirely, which was a carve-out bypass (MYAG-203: rename `backend/server.js` -> `backend/app.js` and only the new name showed up). Both sides of a rename/copy are included. |
 | `health-check.js` | Hits real service paths (`/`, `/api/theme`) post-deploy, not just "is the process up." A deploy that starts cleanly but serves broken responses fails this. |
 | `audit.js` | Formats and posts the mandatory audit comment (success, rollback, or rejection) via the `multica` CLI — reuses the CLI install/auth the Mika bridge already requires, no new credential surface. |
-| `orchestrator.js` | Ties the above together: diff → carve-out check → deploy.sh → health-check → rollback.sh if unhealthy → exactly one audit comment, always. |
+| `orchestrator.js` | Ties the above together: diff (via `changed-files.js`) → carve-out check → deploy.sh → health-check → rollback.sh if unhealthy → exactly one audit comment, always. |
 | `deploy.sh` / `rollback.sh` | Tag-based docker compose deploy/rollback for the `backend` service. `deploy.sh` tags the currently-running image `hurricane-backend:last-good` before building/starting the new one; `rollback.sh` restores that tag. Requires `image: hurricane-backend:latest` on the `backend` service in `docker-compose.yml` (added as part of this change) so the tag is authoritative. |
 | `test/` | Integration test proving the three required scenarios — see below. |
 

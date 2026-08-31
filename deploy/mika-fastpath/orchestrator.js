@@ -24,18 +24,11 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const { checkCarveOut } = require('./carve-out');
+const { getChangedFiles } = require('./changed-files');
 const { runHealthChecks } = require('./health-check');
 const { formatAuditComment, postAuditComment, fileNormalIssue } = require('./audit');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-
-function getChangedFiles(baseRef, headRef) {
-    const out = execFileSync('git', ['diff', '--name-only', `${baseRef}..${headRef}`], {
-        cwd: REPO_ROOT,
-        encoding: 'utf8',
-    });
-    return out.split('\n').map(l => l.trim()).filter(Boolean);
-}
 
 function runScript(scriptPath, args, envExtra) {
     return execFileSync(scriptPath, args, {
@@ -65,7 +58,7 @@ async function main() {
         process.exit(2);
     }
 
-    const changedFiles = getChangedFiles(args.base, args.head);
+    const changedFiles = getChangedFiles(args.base, args.head, { cwd: REPO_ROOT });
     const carveOut = checkCarveOut(changedFiles);
 
     if (!carveOut.allowed) {

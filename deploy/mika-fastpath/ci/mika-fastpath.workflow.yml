@@ -47,11 +47,16 @@ jobs:
         run: node --test deploy/mika-fastpath/*.unit.test.js
       - name: Evaluate carve-out for this diff
         id: check
+        # Reuses changed-files.js (not a second hand-rolled `git diff
+        # --name-only`) so this routing check and orchestrator.js's own
+        # internal check can't drift apart on rename handling again
+        # (MYAG-203) -- orchestrator.js still re-checks for real before
+        # deploying either way, this step only decides which job runs.
         run: |
           node -e "
             const { checkCarveOut } = require('./deploy/mika-fastpath/carve-out');
-            const { execSync } = require('child_process');
-            const files = execSync('git diff --name-only ${{ inputs.base_ref }}..${{ inputs.head_ref }}').toString().split('\n').filter(Boolean);
+            const { getChangedFiles } = require('./deploy/mika-fastpath/changed-files');
+            const files = getChangedFiles('${{ inputs.base_ref }}', '${{ inputs.head_ref }}', { cwd: '.' });
             const result = checkCarveOut(files);
             console.log(JSON.stringify(result));
             require('fs').appendFileSync(process.env.GITHUB_OUTPUT, 'allowed=' + result.allowed + '\n');
