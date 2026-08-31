@@ -511,6 +511,7 @@
                     <a href="#" data-panel="hai" onclick="event.preventDefault(); showPanel('hai');">HAI Messenger</a>
                     <a href="#" data-panel="h" onclick="event.preventDefault(); showPanel('h');">H AI</a>
                     <a href="#" data-panel="app-three" onclick="event.preventDefault(); showPanel('app-three');">Auto Data Analyst</a>
+                    <a href="#" data-panel="app-four" onclick="event.preventDefault(); showPanel('app-four');">Job Board</a>
                     <a href="#" data-panel="projects" onclick="event.preventDefault(); showPanel('projects');">Projects</a>
                 </nav>
 
@@ -523,6 +524,7 @@
                 <a href="#" data-panel="hai" onclick="event.preventDefault(); showPanel('hai'); mobileNav.classList.remove('open');">HAI Messenger</a>
                 <a href="#" data-panel="h" onclick="event.preventDefault(); showPanel('h'); mobileNav.classList.remove('open');">H AI</a>
                 <a href="#" data-panel="app-three" onclick="event.preventDefault(); showPanel('app-three'); mobileNav.classList.remove('open');">Auto Data Analyst</a>
+                <a href="#" data-panel="app-four" onclick="event.preventDefault(); showPanel('app-four'); mobileNav.classList.remove('open');">Job Board</a>
                 <a href="#" data-panel="projects" onclick="event.preventDefault(); showPanel('projects'); mobileNav.classList.remove('open');">Projects</a>
             </div>
         </header>
@@ -558,6 +560,13 @@
                             and charts the answers for you.</p>
                         <span class="app-summary-tag">Live &amp; ready →</span>
                     </div>
+                    <div class="app-summary-card" onclick="showPanel('app-four')">
+                        <div class="app-summary-icon">J</div>
+                        <h3>Job Board</h3>
+                        <p>Create your own account, tell it which roles you're after, and optionally upload your
+                            resume — it ranks real postings by how well they match you.</p>
+                        <span class="app-summary-tag">Live &amp; ready →</span>
+                    </div>
                 </div>
 
                 <div class="section-block">
@@ -578,7 +587,7 @@
                         <div class="pillar-card">
                             <div class="pillar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></div>
                             <h3>Growing suite</h3>
-                            <p>HAI Messenger, H AI, and Auto Data Analyst are live today — more apps are coming under the same roof.</p>
+                            <p>HAI Messenger, H AI, Auto Data Analyst, and the Job Board are live today — more apps are coming under the same roof.</p>
                         </div>
                     </div>
                 </div>
@@ -899,6 +908,24 @@
                 <div class="cta-row">
                     <a href="https://myhai.org/analyst/" class="btn btn-primary">
                         Open Auto Data Analyst
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </a>
+                </div>
+            </div>
+
+            <!-- JOB BOARD -->
+            <div class="app-panel" id="panel-app-four">
+                <button type="button" class="panel-back-btn" onclick="showPanel('home')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    All apps
+                </button>
+                <div class="badge"><b>Free</b> Your own personalized job feed</div>
+                <h1>Meet the <span class="accent">Job Board.</span></h1>
+                <p class="subtitle">Create an account, add the roles you're interested in, and upload your resume
+                    for better matches — it pulls real postings and ranks them by how well they fit your profile.</p>
+                <div class="cta-row">
+                    <a href="https://myhai.org/jobs/" class="btn btn-primary">
+                        Open Job Board
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                     </a>
                 </div>

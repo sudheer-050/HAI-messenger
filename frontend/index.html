@@ -11341,42 +11341,86 @@ void main(){
         });
     }
 
-    /* AT-REST ENCRYPTION — a non-extractable AES-256-GCM key lives only inside this
-       browser's IndexedDB as a native CryptoKey object (structured-clone stored, same
-       as any other idbSet value). Because it's non-extractable, no script — including
-       this app's own devtools console, or anything reading the raw IndexedDB files on
-       disk — can ever read the key material out as bytes; it's only usable in-place via
-       crypto.subtle. This is what makes locally-cached chat history/profile data
-       unreadable by anything except this app running in this exact browser. */
+    /* AT-REST ENCRYPTION — an AES-256-GCM key's raw bytes are stored (base64) in this
+       browser's IndexedDB and re-imported into a CryptoKey each session, rather than
+       structured-cloning a non-extractable CryptoKey object directly into IndexedDB.
+       The latter proved fragile across browsers/versions (MYAG-78: a silently corrupted
+       or partially-written CryptoKey clone made every subsequent crypto.subtle call throw
+       a generic "Cryptographic exception" with no recovery path, locking users out).
+       getOrCreateDeviceKey self-heals: a corrupted stored key, or an encrypt/decrypt
+       failure using it, regenerates a fresh key and continues, discarding any
+       locally-cached data that was encrypted under the old key — server-side data is
+       unaffected. This tradeoff (raw key bytes now technically readable from on-disk
+       IndexedDB, vs. permanent lockout on corruption) was confirmed acceptable by the
+       user. */
     let deviceKeyPromise = null;
+
+    async function importDeviceKey(rawBytes) {
+        return window.crypto.subtle.importKey('raw', rawBytes, 'AES-GCM', true, ['encrypt', 'decrypt']);
+    }
+
+    async function generateAndStoreDeviceKey(keyId) {
+        const key = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+        const rawBytes = await window.crypto.subtle.exportKey('raw', key);
+        await idbSet(keyId, arrayBufferToBase64(rawBytes));
+        return key;
+    }
+
     async function getOrCreateDeviceKey() {
         if (deviceKeyPromise) return deviceKeyPromise;
         deviceKeyPromise = (async () => {
             const keyId = `hai_devicekey_${myUsername}`;
-            let key = await idbGet(keyId);
-            if (!key) {
-                key = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-                await idbSet(keyId, key);
+            const stored = await idbGet(keyId);
+            if (stored) {
+                try {
+                    return await importDeviceKey(base64ToArrayBuffer(stored));
+                } catch (err) {
+                    // Corrupted/malformed stored key bytes — fall through to regenerate.
+                }
             }
-            return key;
+            return generateAndStoreDeviceKey(keyId);
         })();
         return deviceKeyPromise;
     }
 
+    async function regenerateDeviceKey() {
+        const keyId = `hai_devicekey_${myUsername}`;
+        deviceKeyPromise = generateAndStoreDeviceKey(keyId);
+        return deviceKeyPromise;
+    }
+
     async function encryptForStorage(plainObject) {
-        const key = await getOrCreateDeviceKey();
-        const iv = window.crypto.getRandomValues(new Uint8Array(12));
         const encoded = new TextEncoder().encode(JSON.stringify(plainObject));
-        const ciphertext = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
-        return { iv: arrayBufferToBase64(iv.buffer), ciphertext: arrayBufferToBase64(ciphertext) };
+        const encrypt = async () => {
+            const key = await getOrCreateDeviceKey();
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const ciphertext = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+            return { iv: arrayBufferToBase64(iv.buffer), ciphertext: arrayBufferToBase64(ciphertext) };
+        };
+        try {
+            return await encrypt();
+        } catch (err) {
+            await regenerateDeviceKey();
+            return encrypt();
+        }
     }
 
     async function decryptFromStorage(blob) {
-        const key = await getOrCreateDeviceKey();
-        const iv = new Uint8Array(base64ToArrayBuffer(blob.iv));
-        const ciphertext = base64ToArrayBuffer(blob.ciphertext);
-        const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-        return JSON.parse(new TextDecoder().decode(decrypted));
+        const decrypt = async () => {
+            const key = await getOrCreateDeviceKey();
+            const iv = new Uint8Array(base64ToArrayBuffer(blob.iv));
+            const ciphertext = base64ToArrayBuffer(blob.ciphertext);
+            const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+            return JSON.parse(new TextDecoder().decode(decrypted));
+        };
+        try {
+            return await decrypt();
+        } catch (err) {
+            // Data was encrypted under a now-corrupted key — unrecoverable. Regenerate
+            // for future writes and treat this cached blob as absent instead of failing.
+            await regenerateDeviceKey();
+            return null;
+        }
     }
 
     async function loadSavedConversations() {
@@ -11479,7 +11523,7 @@ void main(){
     async function loadNearbyMatches() {
         const blob = await idbGet(`hai_nearby_${myUsername}`);
         if (blob && blob.iv && blob.ciphertext) {
-            nearbyMatches = await decryptFromStorage(blob);
+            nearbyMatches = (await decryptFromStorage(blob)) || {};
         } else {
             nearbyMatches = blob || {}; // pre-encryption plaintext, migrated below
         }
@@ -11509,7 +11553,7 @@ void main(){
     // everything else in here; loaded once at login, saved every time a fetch resolves.
     async function loadRemoteProfileCache() {
         const blob = await idbGet(`hai_remoteprofiles_${myUsername}`);
-        remoteProfileCache = (blob && blob.iv) ? await decryptFromStorage(blob) : (blob || {});
+        remoteProfileCache = (blob && blob.iv) ? ((await decryptFromStorage(blob)) || {}) : (blob || {});
     }
     async function persistRemoteProfileCache() {
         try {
@@ -11532,9 +11576,9 @@ void main(){
 
     async function loadStatuses() {
         const mineBlob = await idbGet(`hai_mystatus_${myUsername}`);
-        myStatuses = (mineBlob && mineBlob.iv) ? await decryptFromStorage(mineBlob) : (mineBlob || []);
+        myStatuses = (mineBlob && mineBlob.iv) ? ((await decryptFromStorage(mineBlob)) || []) : (mineBlob || []);
         const theirsBlob = await idbGet(`hai_contactstatus_${myUsername}`);
-        contactStatuses = (theirsBlob && theirsBlob.iv) ? await decryptFromStorage(theirsBlob) : (theirsBlob || {});
+        contactStatuses = (theirsBlob && theirsBlob.iv) ? ((await decryptFromStorage(theirsBlob)) || {}) : (theirsBlob || {});
         purgeExpiredStatuses();
     }
     async function persistMyStatuses() {
@@ -11971,7 +12015,7 @@ void main(){
         const key = `hai_profile_${myUsername}`;
         const blob = await idbGet(key);
         if (blob && blob.iv && blob.ciphertext) {
-            profileStoreCache = await decryptFromStorage(blob);
+            profileStoreCache = (await decryptFromStorage(blob)) || {};
             return;
         }
         // One-time migration from the old plaintext localStorage store.

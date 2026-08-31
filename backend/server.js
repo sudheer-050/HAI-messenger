@@ -16,6 +16,8 @@ const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const cookieParser = require('cookie-parser');
 const { rateLimit } = require('express-rate-limit');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
 const {
     loadMikaConfig, isMikaConfigured, computeContentHash, buildIssueTitle, selectMikaReply,
 } = require('./mika-bridge');
@@ -302,6 +304,420 @@ async function areFriends(a, b) {
     const result = await pgPool.query('SELECT 1 FROM friendships WHERE user_a = $1 AND user_b = $2', [userA, userB]);
     return result.rows.length > 0;
 }
+
+/* ============================================================
+   JOB BOARD -- a separate account system (own table, own cookie,
+   own JWT payload shape) deliberately mirroring the HAI Messenger
+   auth above (bcrypt + JWT-in-httpOnly-cookie) so the two could be
+   merged into one account system later without a redesign, but for
+   now `job_users`/`jobs_token` never overlap with `users`/`token`.
+   ============================================================ */
+pgPool.query(`
+    CREATE TABLE IF NOT EXISTS job_users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(20) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS job_preferences (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(20) NOT NULL REFERENCES job_users(username) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        location TEXT,
+        remote_pref VARCHAR(10) NOT NULL DEFAULT 'any',
+        salary_min INTEGER,
+        salary_max INTEGER,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS job_preferences_username_idx ON job_preferences (username);
+
+    -- One resume per user; re-uploading replaces it (ON CONFLICT below), never
+    -- shown to anyone but the owning user (see /api/jobs/resume, requireJobAuth-gated).
+    CREATE TABLE IF NOT EXISTS resumes (
+        username VARCHAR(20) PRIMARY KEY REFERENCES job_users(username) ON DELETE CASCADE,
+        resume_text TEXT NOT NULL,
+        original_filename TEXT,
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Shared across all users, keyed by (id, role_query) rather than id alone --
+    -- the same posting can legitimately show up under more than one role search.
+    CREATE TABLE IF NOT EXISTS job_postings_cache (
+        id TEXT NOT NULL,
+        source VARCHAR(20) NOT NULL,
+        role_query TEXT NOT NULL,
+        title TEXT NOT NULL,
+        company TEXT,
+        location TEXT,
+        salary_min INTEGER,
+        salary_max INTEGER,
+        remote BOOLEAN NOT NULL DEFAULT false,
+        description TEXT,
+        apply_url TEXT NOT NULL,
+        fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (id, role_query)
+    );
+    CREATE INDEX IF NOT EXISTS job_postings_cache_role_query_idx ON job_postings_cache (role_query);
+`).then(() => console.log('💼 Postgres job board tables ready')).catch(err => console.error('Postgres job board init failed:', err.message));
+
+const JOB_COOKIE_OPTS = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV !== 'development',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+};
+
+function signJobSessionToken(username) {
+    // jobUsername (not username) keeps this payload shape unambiguous from a
+    // HAI Messenger token if one were ever decoded by the wrong verifier.
+    return jwt.sign({ jobUsername: username }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+function requireJobAuth(req, res, next) {
+    const token = req.cookies.jobs_token;
+    if (!token) return res.status(401).json({ error: 'Not authenticated.' });
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (!payload.jobUsername) throw new Error('not a job-board session');
+        req.jobUsername = payload.jobUsername;
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Session expired or invalid. Please log in again.' });
+    }
+}
+
+const ipLimitJobAuth = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too many attempts from this IP. Please try again later.' },
+});
+
+app.post('/api/jobs/auth/signup', ipLimitJobAuth, async (req, res) => {
+    const { username, email, password } = req.body || {};
+    if (!username || !email || !password) {
+        return res.status(400).json({ error: 'Username, email, and password are required.' });
+    }
+    if (!USERNAME_PATTERN.test(username)) {
+        return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscore).' });
+    }
+    if (!EMAIL_PATTERN.test(email)) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+    try {
+        const passwordHash = await bcrypt.hash(password, 10);
+        const result = await pgPool.query(
+            'INSERT INTO job_users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING username',
+            [username.toLowerCase(), email.toLowerCase(), passwordHash]
+        );
+        const token = signJobSessionToken(result.rows[0].username);
+        res.cookie('jobs_token', token, JOB_COOKIE_OPTS);
+        res.json({ username: result.rows[0].username });
+    } catch (err) {
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'That username or email is already taken.' });
+        }
+        console.error('jobs signup failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/jobs/auth/login', ipLimitJobAuth, async (req, res) => {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'Username and password are required.' });
+    try {
+        const result = await pgPool.query('SELECT username, password_hash FROM job_users WHERE username = $1', [username.toLowerCase()]);
+        if (!result.rows.length) return res.status(401).json({ error: 'Invalid username or password.' });
+        const match = await bcrypt.compare(password, result.rows[0].password_hash);
+        if (!match) return res.status(401).json({ error: 'Invalid username or password.' });
+        const token = signJobSessionToken(result.rows[0].username);
+        res.cookie('jobs_token', token, JOB_COOKIE_OPTS);
+        res.json({ username: result.rows[0].username });
+    } catch (err) {
+        console.error('jobs login failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.post('/api/jobs/auth/logout', (req, res) => {
+    res.clearCookie('jobs_token', JOB_COOKIE_OPTS);
+    res.json({ ok: true });
+});
+
+app.get('/api/jobs/auth/me', requireJobAuth, (req, res) => {
+    res.json({ username: req.jobUsername });
+});
+
+/* ---- Preferences: one row per tracked role, so "add another role" is just
+   another INSERT and removing one is just a DELETE. ---- */
+app.get('/api/jobs/preferences', requireJobAuth, async (req, res) => {
+    const result = await pgPool.query(
+        'SELECT id, role, location, remote_pref AS "remotePref", salary_min AS "salaryMin", salary_max AS "salaryMax" FROM job_preferences WHERE username = $1 ORDER BY created_at ASC',
+        [req.jobUsername]
+    );
+    res.json({ preferences: result.rows });
+});
+
+app.post('/api/jobs/preferences', requireJobAuth, async (req, res) => {
+    const { role, location, remotePref, salaryMin, salaryMax } = req.body || {};
+    if (typeof role !== 'string' || !role.trim()) {
+        return res.status(400).json({ error: 'A job role is required.' });
+    }
+    if (role.length > 100) return res.status(400).json({ error: 'Role is too long.' });
+    const toIntOrNull = v => (v === undefined || v === null || v === '' || Number.isNaN(Number(v))) ? null : Math.trunc(Number(v));
+    try {
+        const result = await pgPool.query(
+            `INSERT INTO job_preferences (username, role, location, remote_pref, salary_min, salary_max)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, role, location, remote_pref AS "remotePref", salary_min AS "salaryMin", salary_max AS "salaryMax"`,
+            [req.jobUsername, role.trim(), (location || '').trim() || null, remotePref || 'any', toIntOrNull(salaryMin), toIntOrNull(salaryMax)]
+        );
+        res.json({ preference: result.rows[0] });
+    } catch (err) {
+        console.error('add job preference failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+});
+
+app.delete('/api/jobs/preferences/:id', requireJobAuth, async (req, res) => {
+    await pgPool.query('DELETE FROM job_preferences WHERE id = $1 AND username = $2', [req.params.id, req.jobUsername]);
+    res.json({ ok: true });
+});
+
+/* ---- Resume: PDF (parsed server-side, never written to disk -- memoryStorage
+   only) or pasted plain text. Only ever readable by the owning user. ---- */
+const jobResumeUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+app.post('/api/jobs/resume', requireJobAuth, jobResumeUpload.single('resume'), async (req, res) => {
+    try {
+        let resumeText = '';
+        let originalFilename = null;
+        if (req.file) {
+            if (req.file.mimetype !== 'application/pdf') {
+                return res.status(400).json({ error: 'Only PDF files are supported right now.' });
+            }
+            const parsed = await pdfParse(req.file.buffer);
+            resumeText = parsed.text;
+            originalFilename = req.file.originalname;
+        } else if (typeof req.body.resumeText === 'string' && req.body.resumeText.trim()) {
+            resumeText = req.body.resumeText;
+        } else {
+            return res.status(400).json({ error: 'Upload a PDF or paste your resume text.' });
+        }
+        resumeText = resumeText.trim().slice(0, 50000);
+        if (!resumeText) return res.status(400).json({ error: "Couldn't extract any text from that file." });
+        await pgPool.query(
+            `INSERT INTO resumes (username, resume_text, original_filename, uploaded_at)
+             VALUES ($1, $2, $3, now())
+             ON CONFLICT (username) DO UPDATE SET resume_text = $2, original_filename = $3, uploaded_at = now()`,
+            [req.jobUsername, resumeText, originalFilename]
+        );
+        res.json({ ok: true, length: resumeText.length });
+    } catch (err) {
+        console.error('resume upload failed:', err.message);
+        res.status(500).json({ error: "Couldn't process that resume. Please try again." });
+    }
+});
+
+app.get('/api/jobs/resume', requireJobAuth, async (req, res) => {
+    const result = await pgPool.query(
+        'SELECT original_filename AS "originalFilename", uploaded_at AS "uploadedAt", length(resume_text) AS length FROM resumes WHERE username = $1',
+        [req.jobUsername]
+    );
+    res.json({ resume: result.rows[0] || null });
+});
+
+/* ---- Job sourcing: Adzuna (primary, needs a free API key) + RemoteOK (free,
+   no key, remote-only) as a zero-cost secondary. Results are cached in
+   job_postings_cache per normalized role query so N users tracking the same
+   role share one Adzuna call instead of one each -- Adzuna's free tier is
+   only ~1,000 calls/month. ---- */
+const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID || null;
+const ADZUNA_APP_KEY = process.env.ADZUNA_APP_KEY || null;
+const JOB_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function normalizeRoleQuery(role) {
+    return role.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+async function fetchAdzunaJobs(roleQuery, location) {
+    if (!ADZUNA_APP_ID || !ADZUNA_APP_KEY) return [];
+    const params = new URLSearchParams({
+        app_id: ADZUNA_APP_ID,
+        app_key: ADZUNA_APP_KEY,
+        results_per_page: '20',
+        what: roleQuery,
+    });
+    // Adzuna's `where` expects a real geographic place (city/state/etc.) --
+    // "remote"/"any"/"hybrid"/"onsite" are work-style values, not locations,
+    // and silently return zero results if passed through as-is.
+    const nonGeographic = new Set(['remote', 'any', 'hybrid', 'onsite', 'on-site', 'on site']);
+    if (location && !nonGeographic.has(location.trim().toLowerCase())) params.set('where', location);
+    const url = `https://api.adzuna.com/v1/api/jobs/us/search/1?${params.toString()}`;
+    try {
+        const res = await fetchWithTimeout(url, {}, 10000);
+        if (!res.ok) throw new Error(`Adzuna responded ${res.status}`);
+        const data = await res.json();
+        return (data.results || []).map(j => ({
+            id: `adzuna:${j.id}`,
+            source: 'adzuna',
+            title: j.title,
+            company: j.company?.display_name || null,
+            location: j.location?.display_name || null,
+            salaryMin: j.salary_min ? Math.round(j.salary_min) : null,
+            salaryMax: j.salary_max ? Math.round(j.salary_max) : null,
+            remote: /remote/i.test(j.title) || /remote/i.test(j.location?.display_name || ''),
+            description: j.description,
+            applyUrl: j.redirect_url,
+        }));
+    } catch (err) {
+        console.warn('Adzuna fetch failed:', err.message);
+        return [];
+    }
+}
+
+async function fetchRemoteOkJobs(roleQuery) {
+    try {
+        const res = await fetchWithTimeout('https://remoteok.com/api', { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
+        if (!res.ok) throw new Error(`RemoteOK responded ${res.status}`);
+        const data = await res.json();
+        // Matching the whole role phrase verbatim (e.g. "machine learning
+        // engineer") almost never hits a real title/tag string -- match if any
+        // significant word from the role appears instead, for real recall.
+        const needleWords = roleQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        return (Array.isArray(data) ? data : [])
+            .filter(j => j && j.id && j.position)
+            .filter(j => {
+                const haystack = `${j.position} ${(j.tags || []).join(' ')}`.toLowerCase();
+                return needleWords.some(w => haystack.includes(w));
+            })
+            .slice(0, 20)
+            .map(j => ({
+                id: `remoteok:${j.id}`,
+                source: 'remoteok',
+                title: j.position,
+                company: j.company || null,
+                location: j.location || 'Remote',
+                salaryMin: j.salary_min || null,
+                salaryMax: j.salary_max || null,
+                remote: true,
+                description: j.description || '',
+                applyUrl: j.url || j.apply_url,
+            }));
+    } catch (err) {
+        console.warn('RemoteOK fetch failed:', err.message);
+        return [];
+    }
+}
+
+async function ensureJobCacheFresh(role, location) {
+    const normalized = normalizeRoleQuery(role);
+    const existing = await pgPool.query('SELECT MAX(fetched_at) AS latest FROM job_postings_cache WHERE role_query = $1', [normalized]);
+    const latest = existing.rows[0]?.latest;
+    if (latest && (Date.now() - new Date(latest).getTime()) < JOB_CACHE_TTL_MS) return;
+
+    const [adzunaJobs, remoteOkJobs] = await Promise.all([
+        fetchAdzunaJobs(normalized, location),
+        fetchRemoteOkJobs(normalized),
+    ]);
+    for (const job of [...adzunaJobs, ...remoteOkJobs]) {
+        try {
+            await pgPool.query(
+                `INSERT INTO job_postings_cache (id, source, role_query, title, company, location, salary_min, salary_max, remote, description, apply_url, fetched_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+                 ON CONFLICT (id, role_query) DO UPDATE SET
+                    title = $4, company = $5, location = $6, salary_min = $7, salary_max = $8, remote = $9, description = $10, apply_url = $11, fetched_at = now()`,
+                [job.id, job.source, normalized, job.title, job.company, job.location, job.salaryMin, job.salaryMax, job.remote, job.description, job.applyUrl]
+            );
+        } catch (err) {
+            console.warn('job cache upsert failed:', err.message);
+        }
+    }
+}
+
+/* ---- Matching: cheap keyword/skill overlap, no LLM call needed per posting
+   (an LLM-tailored resume per top match, like the old Multica pipeline did,
+   is a good fast-follow using the Ollama instance already running here --
+   not required for the base recommendation ranking to work). ---- */
+const MATCH_STOPWORDS = new Set(['the','a','an','is','are','was','were','and','or','for','with','on','in','at',
+    'to','of','this','that','we','you','our','your','will','be','as','by','from','it','its','their']);
+
+function tokenize(text) {
+    return new Set((text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+        .filter(w => w.length > 2 && !MATCH_STOPWORDS.has(w)));
+}
+
+function scoreJobMatch(resumeOrRoleText, preference, posting) {
+    const resumeTokens = tokenize(resumeOrRoleText);
+    const postingTokens = tokenize(`${posting.title} ${posting.description || ''}`);
+    let overlap = 0;
+    postingTokens.forEach(t => { if (resumeTokens.has(t)) overlap++; });
+    const overlapScore = postingTokens.size ? (overlap / postingTokens.size) : 0;
+
+    const roleTokens = tokenize(preference.role);
+    const titleTokens = tokenize(posting.title);
+    let roleOverlap = 0;
+    roleTokens.forEach(t => { if (titleTokens.has(t)) roleOverlap++; });
+    const roleScore = roleTokens.size ? (roleOverlap / roleTokens.size) : 0;
+
+    // Weighted: an exact role/title match matters more than general keyword overlap.
+    return Math.round(Math.min((roleScore * 0.6) + (overlapScore * 0.4), 1) * 100);
+}
+
+app.get('/api/jobs/recommendations', requireJobAuth, async (req, res) => {
+    try {
+        const [prefsResult, resumeResult] = await Promise.all([
+            pgPool.query('SELECT role, location, remote_pref, salary_min, salary_max FROM job_preferences WHERE username = $1', [req.jobUsername]),
+            pgPool.query('SELECT resume_text FROM resumes WHERE username = $1', [req.jobUsername]),
+        ]);
+        const preferences = prefsResult.rows;
+        const resumeText = resumeResult.rows[0]?.resume_text || '';
+        if (!preferences.length) return res.json({ recommendations: [], message: 'Add a job role to get recommendations.' });
+
+        await Promise.all(preferences.map(p => ensureJobCacheFresh(p.role, p.location)));
+
+        const seen = new Set();
+        const scored = [];
+        for (const pref of preferences) {
+            const normalized = normalizeRoleQuery(pref.role);
+            const postingsResult = await pgPool.query('SELECT * FROM job_postings_cache WHERE role_query = $1', [normalized]);
+            for (const posting of postingsResult.rows) {
+                if (seen.has(posting.id)) continue;
+                seen.add(posting.id);
+                scored.push({
+                    id: posting.id,
+                    source: posting.source,
+                    title: posting.title,
+                    company: posting.company,
+                    location: posting.location,
+                    salaryMin: posting.salary_min,
+                    salaryMax: posting.salary_max,
+                    remote: posting.remote,
+                    applyUrl: posting.apply_url,
+                    matchScore: scoreJobMatch(resumeText || pref.role, pref, posting),
+                });
+            }
+        }
+        scored.sort((a, b) => b.matchScore - a.matchScore);
+        res.json({ recommendations: scored.slice(0, 50) });
+    } catch (err) {
+        console.error('recommendations failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong fetching recommendations.' });
+    }
+});
+
+app.get(['/jobs', '/jobs/'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'jobs.html'));
+});
 
 // Cookie options used when issuing and clearing the session cookie.
 // Secure is conditional so local plain-HTTP dev still works; production always

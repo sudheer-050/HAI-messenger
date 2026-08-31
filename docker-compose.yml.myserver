@@ -1,0 +1,142 @@
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: 
+      POSTGRES_PASSWORD: 
+      POSTGRES_DB: 
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1
+
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    restart: unless-stopped
+    environment:
+      - LT_LOAD_ONLY=en,es,fr,de,it,pt,ru,zh,ja,ko,ar,hi,bn,ur
+      - LT_UPDATE_MODELS=true
+      - LT_DISABLE_WEB_UI=true
+    ports:
+      - "127.0.0.1:5005:5000"
+    volumes:
+      - libretranslate_models:/home/libretranslate/.local
+
+  # Free, local CPU inference for H. Models persist separately and are pulled
+  # explicitly by the operator (for example: ollama pull llama3.2:3b).
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+      - TRANSLATE_URL=http://libretranslate:5000
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER}
+      - BASIC_AUTH_PASS=${BASIC_AUTH_PASS}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-llama3.2:3b}
+      - H_OLLAMA_TIMEOUT_MS=${H_OLLAMA_TIMEOUT_MS:-45000}
+      - ENABLE_GEMINI_FALLBACK=${ENABLE_GEMINI_FALLBACK:-false}
+      - NODE_ENV=production
+      - ENFORCE_HTTPS=${ENFORCE_HTTPS:-true}
+      - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:-https://myhai.org}
+      - H_CHAT_RATE_LIMIT=${H_CHAT_RATE_LIMIT:-10}
+      - H_MAX_CONCURRENT_REQUESTS=${H_MAX_CONCURRENT_REQUESTS:-2}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_CHAT_MODEL=${GEMINI_CHAT_MODEL}
+      - KOKORO_TTS_URL=http://kokoro-tts:8880
+      # Job Board sourcing -- free tier at developer.adzuna.com. Missing/blank
+      # is safe: fetchAdzunaJobs() just returns no results, RemoteOK still works.
+      - ADZUNA_APP_ID=${ADZUNA_APP_ID}
+      - ADZUNA_APP_KEY=${ADZUNA_APP_KEY}
+      - MULTICA_PROJECT_ID=${MULTICA_PROJECT_ID}
+      - MIKA_AGENT_ID=${MIKA_AGENT_ID}
+      - MIKA_PARENT_ISSUE_ID=${MIKA_PARENT_ISSUE_ID}
+    volumes:
+      - multica_config:/root/.multica
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+
+  analyst:
+    build:
+      context: /home/myserver56/auto-data-analyst
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    environment:
+      - SECRET_KEY=${ANALYST_SECRET_KEY}
+    volumes:
+      - analyst_uploads:/app/uploads
+      - analyst_outputs:/app/outputs
+
+  # Local Kokoro TTS inference — CPU-only, no cloud dependency.
+  # Internal-only: backend reaches it as http://kokoro-tts:8880.
+  # 127.0.0.1 host port is for manual smoke-testing only.
+  # Voice is set via DEFAULT_VOICE; swap it in .env and restart without
+  # rebuilding. Model weights are cached in the kokoro_models volume.
+  kokoro-tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2
+    restart: unless-stopped
+    environment:
+      - DEFAULT_VOICE=${KOKORO_VOICE:-af_heart}
+    ports:
+      - "127.0.0.1:8880:8880"
+    volumes:
+      - kokoro_models:/app/models
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /home/nonroot/.cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/home/nonroot/.cloudflared
+    depends_on:
+      - backend
+      - analyst
+
+volumes:
+  multica_config:
+  pgdata:
+  libretranslate_models:
+  redis_data:
+  ollama_data:
+  analyst_uploads:
+  analyst_outputs:
+  kokoro_models:

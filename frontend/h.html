@@ -173,6 +173,68 @@
         .voice-status { font-size: 15px; color: var(--text-muted); min-height: 20px; text-align: center; max-width: 480px; }
         .voice-transcript { font-size: 17px; font-weight: 500; text-align: center; max-width: 560px; min-height: 26px; padding: 0 20px; }
 
+        /* Orb reacts to conversation state -- dim/grayscale while idle or muted
+           (nothing is being heard), full brightness once actually listening,
+           thinking, or speaking -- so the "is H paying attention right now"
+           answer is visible at a glance, Jarvis/ChatGPT-voice style. */
+        .orb-wrap { transition: opacity 0.25s ease, filter 0.25s ease; }
+        .orb-wrap.state-idle, .orb-wrap.state-muted { opacity: 0.4; filter: grayscale(0.7); }
+        .orb-wrap.state-listening, .orb-wrap.state-thinking, .orb-wrap.state-speaking { opacity: 1; filter: none; }
+
+        /* FLOATING VOICE CONTROL BAR -- draggable pill (mute / mic / end), fixed
+           to the viewport so dragging is independent of page scroll/layout. */
+        .voice-control-bar {
+            position: fixed;
+            left: 50%; bottom: 36px;
+            transform: translateX(-50%);
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            background: rgba(24, 24, 27, 0.78);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 999px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+            z-index: 40;
+            user-select: none;
+        }
+        .vcb-drag-handle {
+            width: 16px; height: 32px; margin-right: 2px;
+            display: grid; grid-template-columns: repeat(2, 3px); grid-auto-rows: 3px; gap: 3px;
+            align-content: center; justify-content: center;
+            cursor: grab; touch-action: none; flex-shrink: 0;
+        }
+        .vcb-drag-handle span { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); }
+        .voice-control-bar.dragging { transition: none; }
+        .voice-control-bar.dragging .vcb-drag-handle { cursor: grabbing; }
+        .vcb-btn {
+            position: relative; border: none; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; flex-shrink: 0;
+            transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+        }
+        .vcb-btn svg { width: 19px; height: 19px; pointer-events: none; }
+        .vcb-mute { width: 42px; height: 42px; background: var(--glass-strong); color: var(--text-normal); }
+        .vcb-mute:hover { background: var(--glass-weak); }
+        .vcb-mute.is-muted { background: rgba(218, 55, 60, 0.18); color: #f28b8e; }
+        .vcb-mic {
+            width: 58px; height: 58px;
+            background: linear-gradient(145deg, var(--accent-brand), var(--accent-brand-hover));
+        }
+        .vcb-mic:hover { transform: scale(1.05); }
+        .vcb-mic.is-listening { animation: vcbPulse 1.4s ease-out infinite; }
+        .vcb-mic.is-speaking { background: linear-gradient(145deg, #6fd6a8, #38b479); }
+        .vcb-mic.is-muted-state { background: var(--glass-strong); opacity: 0.55; }
+        @keyframes vcbPulse {
+            0% { box-shadow: 0 0 0 0 rgba(155, 138, 251, 0.55); }
+            70% { box-shadow: 0 0 0 16px rgba(155, 138, 251, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(155, 138, 251, 0); }
+        }
+        .vcb-end { width: 42px; height: 42px; background: #da373c; }
+        .vcb-end:hover { background: #c22f34; }
+
         /* HISTORY / TRANSCRIPT PANEL -- toggled by the header button, positioned
            centered horizontally and low (near the bottom) per request, so it reads
            as a drawer sliding up rather than a top-anchored modal. Liquid Glass:
@@ -271,9 +333,28 @@
         </div>
 
         <div id="voiceMode">
-            <div class="orb-wrap"><canvas id="voiceCanvas" width="220" height="220"></canvas></div>
+            <div class="orb-wrap state-idle"><canvas id="voiceCanvas" width="220" height="220"></canvas></div>
             <div class="voice-transcript" id="voiceTranscript"></div>
             <div class="voice-status" id="voiceStatus">Starting…</div>
+        </div>
+
+        <!-- Floating, draggable voice controls -- mute / mic (tap to talk, tap
+             again to interrupt H) / end. Fixed to the viewport, not #voiceMode,
+             so dragging works independent of scroll/layout. -->
+        <div class="voice-control-bar" id="voiceControlBar">
+            <div class="vcb-drag-handle" id="voiceDragHandle" title="Drag">
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <button type="button" class="vcb-btn vcb-mute" id="voiceMuteBtn" aria-label="Mute microphone" title="Mute">
+                <svg class="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                <svg class="icon-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button type="button" class="vcb-btn vcb-mic" id="voiceMicBtn" aria-label="Tap to talk" title="Tap to talk">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button type="button" class="vcb-btn vcb-end" id="voiceEndBtn" aria-label="End voice chat" title="End">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
         </div>
 
         <!-- HISTORY / TRANSCRIPT PANEL, positioned centered-bottom (see CSS) -->
@@ -341,6 +422,70 @@
             return { reply: data.reply, emotion: data.emotion || 'neutral', audio: data.audio || null };
         }
 
+        // "Thinking" filler audio -- the LLM + TTS round trip is slow enough that
+        // silence reads as broken/unresponsive. Pre-synthesized once (same Kokoro
+        // voice, so it doesn't clash) and played only if the real reply is taking
+        // a noticeable while, same idea as ChatGPT voice's "let me think" beat.
+        const H_FILLER_PHRASES = [
+            "Hmm, let me think about that for a second.",
+            "Good question, give me just a moment.",
+            "Let me think that through real quick.",
+            "One second, thinking about that.",
+            "Give me a moment to work that out.",
+            "Let me piece that together.",
+            "Okay, thinking about the best way to answer that.",
+            "Just a moment, mulling that over.",
+            "Let me get that figured out for you.",
+            "Hang on, working through that one.",
+            "Interesting one -- let me think.",
+            "Give me a second to gather my thoughts.",
+        ];
+        // For a wait that drags on past the first filler and a joke, these read
+        // as genuine progress reassurance instead of the same "thinking" beat on
+        // loop -- distinct pool so they don't get mixed in with the opening filler.
+        const H_ALMOST_THERE_PHRASES = [
+            "Almost there, just a moment more.",
+            "Just about got it, thanks for hanging in there.",
+            "Nearly done thinking this through.",
+            "A little more time and I'll have it for you.",
+            "Almost ready with an answer.",
+            "Just a bit longer, I'm nearly there.",
+        ];
+        let hFillerAudioObjects = [];
+        let hAlmostThereAudioObjects = [];
+        let hFillerLoadPromise = null;
+        let hLastFillerIndex = -1;
+        let hLastAlmostThereIndex = -1;
+        function loadHFillerAudio() {
+            if (hFillerLoadPromise) return hFillerLoadPromise;
+            const synth = text => fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+                .then(r => r.json()).then(d => d.audio || null).catch(() => null);
+            hFillerLoadPromise = Promise.all([
+                Promise.all(H_FILLER_PHRASES.map(synth)).then(results => { hFillerAudioObjects = results.filter(Boolean); }),
+                Promise.all(H_ALMOST_THERE_PHRASES.map(synth)).then(results => { hAlmostThereAudioObjects = results.filter(Boolean); }),
+            ]);
+            return hFillerLoadPromise;
+        }
+        // Never repeats the immediately-previous phrase back to back, so a slow
+        // reply that needs two or three fillers in a row doesn't sound like a
+        // broken record.
+        function pickHFillerAudio() {
+            if (!hFillerAudioObjects.length) return null;
+            if (hFillerAudioObjects.length === 1) return hFillerAudioObjects[0];
+            let idx;
+            do { idx = Math.floor(Math.random() * hFillerAudioObjects.length); } while (idx === hLastFillerIndex);
+            hLastFillerIndex = idx;
+            return hFillerAudioObjects[idx];
+        }
+        function pickHAlmostThereAudio() {
+            if (!hAlmostThereAudioObjects.length) return null;
+            if (hAlmostThereAudioObjects.length === 1) return hAlmostThereAudioObjects[0];
+            let idx;
+            do { idx = Math.floor(Math.random() * hAlmostThereAudioObjects.length); } while (idx === hLastAlmostThereIndex);
+            hLastAlmostThereIndex = idx;
+            return hAlmostThereAudioObjects[idx];
+        }
+
         /* ============ MODE SWITCHING ============ */
         const modeToggle = document.getElementById('modeToggle');
         const textModeBtn = document.getElementById('textModeBtn');
@@ -352,25 +497,31 @@
             const toText = mode === 'text';
             textModeEl.style.display = toText ? 'flex' : 'none';
             voiceModeEl.style.display = toText ? 'none' : 'flex';
+            voiceControlBar.style.display = toText ? 'none' : 'flex';
             textModeBtn.classList.toggle('active', toText);
             voiceModeBtn.classList.toggle('active', !toText);
             modeToggle.classList.toggle('voice', !toText);
             if (toText) {
                 stopVoiceConversation();
             } else {
+                voiceMuted = false;
+                updateMuteUI();
                 initVoiceOrb();
-                startVoiceConversation(); // auto-starts -- no separate mic button
+                loadHFillerAudio(); // warm the "let me think" cache before it's needed
+                startVoiceConversation(); // auto-starts listening, like ChatGPT voice
             }
         }
-        // Reuse one media element for every turn. Starting it synchronously from
-        // the Voice tap unlocks later Kokoro playback on mobile browsers, where
-        // the real MP3 only arrives after an asynchronous request.
+        // Mobile browsers (iOS Safari, many Android WebViews) only allow an
+        // <audio> element to produce sound if it's first played synchronously
+        // inside a user gesture (a tap handler, not an async callback after it).
+        // H's real Kokoro audio always arrives later, after an await'd fetch --
+        // too late to count as "the gesture" -- so this reuses one Audio element
+        // for every turn and unlocks it here with a silent clip, still inside the tap.
         const hVoiceAudio = new Audio();
         hVoiceAudio.preload = 'auto';
         hVoiceAudio.playsInline = true;
         let audioUnlocked = false;
         const SILENT_WAV = 'data:audio/wav;base64,UklGRioAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQYAAACAgICAgA==';
-
         function unlockAudioForMobile() {
             if (audioUnlocked) return;
             audioUnlocked = true;
@@ -378,8 +529,8 @@
             hVoiceAudio.src = SILENT_WAV;
             const playAttempt = hVoiceAudio.play();
             if (playAttempt) playAttempt.then(() => {
-                // A very fast response may already have replaced the silent
-                // source with Kokoro audio; never tear that playback down.
+                // A very fast reply may already have replaced the silent source
+                // with real Kokoro audio -- never tear that playback down.
                 if (!hVoiceAudio.src.startsWith('data:audio/wav')) return;
                 hVoiceAudio.pause();
                 hVoiceAudio.currentTime = 0;
@@ -490,11 +641,131 @@
         let voiceConversationActive = false;
         let voiceRecognition = null;
         let isHSpeaking = false;
+        let voiceMuted = false;
         let orbSpeedMultiplier = 1;
         let voiceTurnToken = 0; // guards against overlapping turns -- the fix for the double-voice bug
+        let lastSpokenReply = ''; // what H just said out loud -- used to catch her own voice leaking into the mic
+
+        // Without headphones, H's TTS plays through the speakers and the mic picks
+        // some of it back up -- Chrome's SpeechRecognition doesn't get real echo
+        // cancellation the way a phone call does. If what the mic just heard is
+        // actually (most of) what H herself just said, treat it as her own echo,
+        // not something the visitor said, so she doesn't reply to herself in a loop.
+        function isEchoOfLastReply(heard) {
+            if (!lastSpokenReply || !heard) return false;
+            const norm = s => s.toLowerCase().replace(/[^\w\s]/g, '').trim();
+            const heardNorm = norm(heard);
+            const replyNorm = norm(lastSpokenReply);
+            if (!heardNorm) return false;
+            if (replyNorm.includes(heardNorm)) return true;
+            const heardWords = new Set(heardNorm.split(/\s+/));
+            const replyWords = new Set(replyNorm.split(/\s+/));
+            let overlap = 0;
+            heardWords.forEach(w => { if (replyWords.has(w)) overlap++; });
+            return overlap / heardWords.size > 0.7;
+        }
 
         function setVoiceStatus(text) { voiceStatus.textContent = text; }
 
+        /* ---- Floating control bar: mute / mic / end ---- */
+        const voiceControlBar = document.getElementById('voiceControlBar');
+        const voiceMuteBtn = document.getElementById('voiceMuteBtn');
+        const voiceMicBtn = document.getElementById('voiceMicBtn');
+        const voiceEndBtn = document.getElementById('voiceEndBtn');
+        const voiceDragHandle = document.getElementById('voiceDragHandle');
+        const orbWrapEl = document.querySelector('.orb-wrap');
+
+        // Single source of truth for what the orb + mic button look like --
+        // 'idle'/'muted' dim the orb (H isn't hearing anything right now),
+        // 'listening'/'thinking'/'speaking' light it back up.
+        function setOrbState(state) {
+            orbWrapEl.classList.remove('state-idle', 'state-listening', 'state-thinking', 'state-speaking', 'state-muted');
+            orbWrapEl.classList.add('state-' + state);
+            voiceMicBtn.classList.toggle('is-listening', state === 'listening');
+            voiceMicBtn.classList.toggle('is-speaking', state === 'speaking');
+            voiceMicBtn.classList.toggle('is-muted-state', state === 'muted');
+        }
+
+        function updateMuteUI() {
+            voiceMuteBtn.classList.toggle('is-muted', voiceMuted);
+            voiceMuteBtn.querySelector('.icon-mic').style.display = voiceMuted ? 'none' : 'block';
+            voiceMuteBtn.querySelector('.icon-mic-off').style.display = voiceMuted ? 'block' : 'none';
+        }
+
+        voiceMuteBtn.addEventListener('click', () => {
+            voiceMuted = !voiceMuted;
+            updateMuteUI();
+            if (voiceMuted) {
+                stopAnyRecognition();
+                if (!isHSpeaking) { setVoiceStatus('Muted — tap mic to talk'); setOrbState('muted'); }
+            } else if (!isHSpeaking && voiceConversationActive) {
+                startVoiceListenCycle(); // unmuting resumes the continuous conversation
+            }
+        });
+
+        // Tap-to-talk / barge-in: while H is speaking, tapping the mic interrupts
+        // her and starts listening immediately -- the same "cut her off" gesture
+        // ChatGPT's voice mode supports, instead of having to wait her out.
+        voiceMicBtn.addEventListener('click', () => {
+            if (!voiceConversationActive) return;
+            if (isHSpeaking) {
+                stopSpeaking();
+                isHSpeaking = false;
+                voiceTurnToken++; // invalidate the in-flight speak callback so it can't restart the cycle itself
+                if (voiceMuted) { voiceMuted = false; updateMuteUI(); }
+                startVoiceListenCycle();
+                return;
+            }
+            if (voiceRecognition) {
+                // Already listening -- tap again to cancel this turn and go quiet.
+                stopAnyRecognition();
+                setVoiceStatus(voiceMuted ? 'Muted — tap mic to talk' : 'Tap mic to talk');
+                setOrbState(voiceMuted ? 'muted' : 'idle');
+                return;
+            }
+            if (voiceMuted) { voiceMuted = false; updateMuteUI(); }
+            startVoiceListenCycle();
+        });
+
+        voiceEndBtn.addEventListener('click', () => switchMode('text'));
+
+        // Drag the whole pill by its handle -- pointer events cover mouse/touch/pen
+        // alike. Only the handle starts a drag so button taps stay clickable.
+        (function enableControlBarDrag() {
+            let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+            voiceDragHandle.addEventListener('pointerdown', (e) => {
+                dragging = true;
+                voiceControlBar.classList.add('dragging');
+                voiceDragHandle.setPointerCapture(e.pointerId);
+                const rect = voiceControlBar.getBoundingClientRect();
+                startLeft = rect.left; startTop = rect.top;
+                startX = e.clientX; startY = e.clientY;
+                voiceControlBar.style.left = rect.left + 'px';
+                voiceControlBar.style.top = rect.top + 'px';
+                voiceControlBar.style.bottom = 'auto';
+                voiceControlBar.style.transform = 'none';
+            });
+            voiceDragHandle.addEventListener('pointermove', (e) => {
+                if (!dragging) return;
+                const maxLeft = window.innerWidth - voiceControlBar.offsetWidth - 8;
+                const maxTop = window.innerHeight - voiceControlBar.offsetHeight - 8;
+                const newLeft = Math.min(Math.max(8, startLeft + (e.clientX - startX)), Math.max(8, maxLeft));
+                const newTop = Math.min(Math.max(8, startTop + (e.clientY - startY)), Math.max(8, maxTop));
+                voiceControlBar.style.left = newLeft + 'px';
+                voiceControlBar.style.top = newTop + 'px';
+            });
+            function endDrag(e) {
+                if (!dragging) return;
+                dragging = false;
+                voiceControlBar.classList.remove('dragging');
+                try { voiceDragHandle.releasePointerCapture(e.pointerId); } catch (err) {}
+            }
+            voiceDragHandle.addEventListener('pointerup', endDrag);
+            voiceDragHandle.addEventListener('pointercancel', endDrag);
+        })();
+
+        // Reuses hVoiceAudio (declared above, for the mobile unlock) for every
+        // turn instead of creating a new element each time.
         let activeVoiceObjectUrl = null;
         let audioPlaybackToken = 0;
         function stopSpeaking() {
@@ -520,6 +791,9 @@
             return new Blob([bytes], { type: mimeType });
         }
 
+        // Plays H's real Kokoro voice (self-hosted, ChatGPT-quality) instead of
+        // the browser's robotic built-in speechSynthesis. onEnd(played) reports
+        // whether audio actually played, so callers can fall back to text-only.
         function speak(audio, onEnd) {
             stopSpeaking();
             const playbackToken = audioPlaybackToken;
@@ -554,7 +828,7 @@
         }
 
         function startVoiceListenCycle() {
-            if (!voiceConversationActive || isHSpeaking) return;
+            if (!voiceConversationActive || isHSpeaking || voiceMuted) return;
             stopAnyRecognition(); // never let two recognition instances run at once
             const myToken = ++voiceTurnToken;
             const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -569,6 +843,7 @@
             recognition.maxAlternatives = 1;
             voiceRecognition = recognition;
             orbSpeedMultiplier = 1.6;
+            setOrbState('listening');
             setVoiceStatus('Listening…');
             voiceTranscript.textContent = '';
 
@@ -576,11 +851,19 @@
             recognition.onresult = (e) => {
                 if (myToken !== voiceTurnToken) return;
                 let interim = '';
+                let gotFinal = false;
                 for (let i = e.resultIndex; i < e.results.length; i++) {
-                    if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
+                    if (e.results[i].isFinal) { finalTranscript += e.results[i][0].transcript; gotFinal = true; }
                     else interim += e.results[i][0].transcript;
                 }
                 voiceTranscript.textContent = finalTranscript + interim;
+                // One utterance per turn -- without this, a short pause followed by
+                // more speech (e.g. "hi" ... "how are you") can land as two final
+                // segments inside the SAME cycle, or keep the mic open long enough
+                // to catch a next turn's words before this one's even been handled.
+                // Stopping right away as soon as we have a final segment forces a
+                // clean one-utterance-in, one-reply-out turn every time.
+                if (gotFinal) { try { recognition.stop(); } catch (err) {} }
             };
             recognition.onerror = () => { if (myToken === voiceTurnToken) voiceRecognition = null; };
             recognition.onend = () => {
@@ -589,54 +872,205 @@
                 orbSpeedMultiplier = 1;
                 if (!voiceConversationActive) return;
                 const text = finalTranscript.trim();
-                if (text) handleVoiceTurn(text, myToken);
-                else startVoiceListenCycle(); // silence, nothing said -- keep listening
+                // Confidence-based filtering used to also drop short real words
+                // like "hello" (the recognizer often scores common short words
+                // only moderately confident) -- only guard against true silence
+                // and H hearing her own echo now, not against brevity.
+                const isLikelyNoise = !text || isEchoOfLastReply(text);
+                if (!isLikelyNoise) handleVoiceTurn(text, myToken);
+                else startVoiceListenCycle(); // silence or H's own echo -- keep listening
             };
             try { recognition.start(); } catch (e) { voiceRecognition = null; }
         }
 
-        async function handleVoiceTurn(text, myToken) {
-            setVoiceStatus('H is thinking…');
-            try {
-                const { reply, audio } = await askH(text, { voice: true });
-                if (myToken !== voiceTurnToken || !voiceConversationActive) return; // a newer turn superseded this one
-                recordTranscript('user', text);
-                recordTranscript('assistant', reply);
+        // Light, dependency-free topic guess from what the visitor just said --
+        // good enough to make a filler joke feel "about" the question without
+        // spending an extra LLM call (which would only add to the very wait
+        // we're covering for).
+        const FILLER_STOPWORDS = new Set(['the','a','an','is','are','was','were','what','how','why','who','whats',
+            'when','where','can','you','tell','me','about','please','know','do','does','did','to','of','and','or',
+            'for','with','on','in','at','it','that','this','i','my','your','ive','im','will','would','could','should',
+            'give','some','any','just','like','okay','ok','hey','hi','hello','there']);
+        function guessTopicFromText(text) {
+            const words = (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
+                .filter(w => w && w.length > 2 && !FILLER_STOPWORDS.has(w));
+            if (!words.length) return null;
+            return words.sort((a, b) => b.length - a.length)[0];
+        }
+        // Kept short on purpose -- "complete it faster" per feedback: a joke that's
+        // still going when the real reply arrives never gets cut off mid-sentence
+        // (see hFillerAudioPlaying below), so a long joke would just delay H's
+        // actual answer instead of covering for it.
+        const FILLER_JOKE_TEMPLATES = [
+            'Quick one about {topic} -- why did {topic} bring a ladder? Things were looking up.',
+            'Since we\'re on {topic}: what did one {topic} say to the other? Let\'s stick together.',
+            'Funny you mention {topic} -- I hear {topic} make great listeners, they never interrupt.',
+            'One about {topic}: why so serious? Even {topic} takes a joke sometimes.',
+        ];
+        function buildFillerJokeText(topic) {
+            const template = FILLER_JOKE_TEMPLATES[Math.floor(Math.random() * FILLER_JOKE_TEMPLATES.length)];
+            return template.replace(/\{topic\}/g, topic);
+        }
 
-                const match = reply.match(LEARN_PATTERN);
-                voiceTranscript.textContent = reply;
-                setVoiceStatus('H is speaking…');
+        // Whatever filler/joke line is playing right now is always allowed to
+        // finish -- per feedback, cutting a joke off mid-sentence to jump to the
+        // real answer feels broken. Instead, if the real reply lands while
+        // something is still playing, it's stashed here and delivered the moment
+        // that line's audio naturally ends.
+        let hFillerAudioPlaying = false;
+        let hPendingReply = null;
+        let hReplyPending = false;
+        let hFillerRound = 0;
+
+        function deliverHReply(myToken, reply, audio) {
+            if (myToken !== voiceTurnToken || !voiceConversationActive) return;
+            recordTranscript('user', hLastUserText);
+            recordTranscript('assistant', reply);
+
+            const match = reply.match(LEARN_PATTERN);
+            voiceTranscript.textContent = reply;
+            setVoiceStatus('H is speaking…');
+            setOrbState('speaking');
+            isHSpeaking = true;
+            lastSpokenReply = reply;
+            orbSpeedMultiplier = 2;
+            speak(audio, (played) => {
+                isHSpeaking = false;
+                orbSpeedMultiplier = 1;
+                if (myToken !== voiceTurnToken || !voiceConversationActive) return;
+                if (!played) setVoiceStatus('Voice audio is unavailable — continuing in text.');
+                if (match) {
+                    setVoiceStatus('Switch to Text mode to teach H that word, or just keep talking.');
+                }
+                voiceTranscript.textContent = '';
+                if (voiceMuted) {
+                    setVoiceStatus('Muted — tap mic to talk');
+                    setOrbState('muted');
+                    return;
+                }
+                setOrbState('idle');
+                // Small buffer before re-arming the mic when real audio played --
+                // playback's onended can fire slightly before sound actually
+                // finishes through the speakers, so listening immediately risks
+                // the mic picking up H's own trailing voice and "replying" to
+                // herself. No audio played means nothing to echo, so no delay.
+                if (played) {
+                    setTimeout(() => {
+                        if (myToken === voiceTurnToken && voiceConversationActive && !voiceMuted) startVoiceListenCycle();
+                    }, 700);
+                } else if (voiceConversationActive && !voiceMuted) {
+                    startVoiceListenCycle();
+                }
+            });
+        }
+
+        function playHThinkingFiller(myToken, userText) {
+            if (myToken !== voiceTurnToken || !voiceConversationActive || !hReplyPending) return;
+            hFillerRound++;
+            const proceedWithAudio = (audio) => {
+                if (myToken !== voiceTurnToken || !voiceConversationActive || !hReplyPending) return;
                 isHSpeaking = true;
+                hFillerAudioPlaying = true;
                 orbSpeedMultiplier = 2;
-                speak(audio, (played) => {
+                setOrbState('speaking');
+                speak(audio, () => {
+                    hFillerAudioPlaying = false;
+                    if (myToken !== voiceTurnToken || !voiceConversationActive) return;
                     isHSpeaking = false;
                     orbSpeedMultiplier = 1;
-                    if (myToken !== voiceTurnToken || !voiceConversationActive) return;
-                    if (!played) setVoiceStatus('Voice audio is unavailable — continuing in text.');
-                    if (match) {
-                        setVoiceStatus('Switch to Text mode to teach H that word, or just keep talking.');
+                    // The real reply arrived while this line was playing -- since
+                    // we never cut it off, deliver the answer now that it's done.
+                    if (hPendingReply) {
+                        const { reply, audio: replyAudio } = hPendingReply;
+                        hPendingReply = null;
+                        deliverHReply(myToken, reply, replyAudio);
+                        return;
                     }
-                    voiceTranscript.textContent = '';
-                    startVoiceListenCycle();
+                    if (!hReplyPending) return;
+                    setOrbState('thinking');
+                    // Ollama can legitimately take a while on CPU -- if it's still
+                    // not back, say something else after a real pause, rather than
+                    // going quiet again for the rest of a long wait.
+                    setTimeout(() => playHThinkingFiller(myToken, userText), 3000);
                 });
+            };
+            // Round 1 needs to be instant (it's covering the very first beat of
+            // silence) -- generic pre-loaded pool. Round 2 spends one /api/tts
+            // round trip on a topical joke, now that the wait already justifies
+            // it. Round 3+ shifts to "almost there" reassurance rather than
+            // telling joke after joke.
+            if (hFillerRound === 2) {
+                const topic = guessTopicFromText(userText);
+                if (topic) {
+                    fetch('/api/tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: buildFillerJokeText(topic) }),
+                    }).then(r => r.json()).then(d => {
+                        if (myToken !== voiceTurnToken || !voiceConversationActive || !hReplyPending) return;
+                        proceedWithAudio(d.audio || pickHFillerAudio());
+                    }).catch(() => proceedWithAudio(pickHFillerAudio()));
+                    return;
+                }
+            }
+            const audio = hFillerRound >= 3
+                ? (pickHAlmostThereAudio() || pickHFillerAudio())
+                : pickHFillerAudio();
+            if (!audio) return; // not loaded yet -- just stay quiet, no big deal
+            proceedWithAudio(audio);
+        }
+
+        let hTurnInFlight = false;
+        let hLastUserText = '';
+        async function handleVoiceTurn(text, myToken) {
+            if (hTurnInFlight) return; // defensive -- a turn is already being handled, never overlap two
+            hTurnInFlight = true;
+            hLastUserText = text;
+            lastSpokenReply = ''; // a real new turn is starting -- stop guarding against the old echo
+            setOrbState('thinking');
+            setVoiceStatus('H is thinking…');
+            // The LLM + TTS round trip is slow enough to read as broken silence --
+            // if the real reply isn't back within a beat, speak a quick filler
+            // instead of leaving dead air, same idea as ChatGPT voice's "let me think".
+            hReplyPending = true;
+            hFillerRound = 0;
+            hPendingReply = null;
+            const fillerTimer = setTimeout(() => playHThinkingFiller(myToken, text), 1200);
+            try {
+                const { reply, audio } = await askH(text, { voice: true });
+                hReplyPending = false;
+                hTurnInFlight = false;
+                clearTimeout(fillerTimer);
+                if (myToken !== voiceTurnToken || !voiceConversationActive) return; // a newer turn superseded this one
+                // A filler/joke is still mid-sentence -- let it finish naturally
+                // instead of cutting it off; its own onEnd will deliver this.
+                if (hFillerAudioPlaying) { hPendingReply = { reply, audio }; return; }
+                deliverHReply(myToken, reply, audio);
             } catch (err) {
+                hReplyPending = false;
+                hTurnInFlight = false;
+                clearTimeout(fillerTimer);
                 if (myToken !== voiceTurnToken || !voiceConversationActive) return;
+                setOrbState('idle');
                 setVoiceStatus("Couldn't reach H -- trying again shortly.");
-                setTimeout(() => { if (voiceConversationActive) startVoiceListenCycle(); }, 2000);
+                setTimeout(() => { if (voiceConversationActive && !voiceMuted) startVoiceListenCycle(); }, 2000);
             }
         }
 
         function startVoiceConversation() {
             voiceConversationActive = true;
-            startVoiceListenCycle();
+            startVoiceListenCycle(); // continuous conversation -- she's listening the moment you open voice mode
         }
         function stopVoiceConversation() {
             voiceConversationActive = false;
             isHSpeaking = false;
+            voiceMuted = false;
             orbSpeedMultiplier = 1;
             voiceTurnToken++; // invalidate any in-flight cycle/turn
             stopAnyRecognition();
             stopSpeaking();
+            setOrbState('idle');
+            updateMuteUI();
             setVoiceStatus('Starting…');
             voiceTranscript.textContent = '';
         }
