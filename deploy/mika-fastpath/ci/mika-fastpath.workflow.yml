@@ -1,0 +1,98 @@
+name: Mika fast-path deploy
+
+# Manually dispatched only -- this does NOT run on every push. The Mika
+# bridge (backend/mika-bridge.js) is expected to trigger this via the GitHub
+# API once an admin-approved change exists as a commit/branch, passing the
+# correlation id and a summary of the admin's request through.
+#
+# NOTE: the `deploy` job targets a `mika-fastpath-prod` self-hosted runner
+# label that is intentionally NOT configured anywhere in this repo yet.
+# Wiring this workflow to the real production host (192.168.0.180 / myhai.org)
+# is a separate, explicit step outside this change -- see deploy/mika-fastpath/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      head_ref:
+        description: 'Commit/branch containing the admin-approved change'
+        required: true
+      base_ref:
+        description: 'Ref to diff against (last deployed commit)'
+        required: true
+        default: 'master'
+      correlation_id:
+        description: 'Correlation id from the Mika bridge request'
+        required: true
+      admin_request_summary:
+        description: 'Short human-readable summary of what the admin asked for'
+        required: false
+        default: ''
+      issue_id:
+        description: 'Multica issue id to post the audit comment on'
+        required: true
+
+jobs:
+  carve-out-check:
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run carve-out + unit tests
+        run: node --test deploy/mika-fastpath/*.unit.test.js
+      - name: Evaluate carve-out for this diff
+        id: check
+        # Reuses changed-files.js (not a second hand-rolled `git diff
+        # --name-only`) so this routing check and orchestrator.js's own
+        # internal check can't drift apart on rename handling again
+        # (MYAG-203) -- orchestrator.js still re-checks for real before
+        # deploying either way, this step only decides which job runs.
+        run: |
+          node -e "
+            const { checkCarveOut } = require('./deploy/mika-fastpath/carve-out');
+            const { getChangedFiles } = require('./deploy/mika-fastpath/changed-files');
+            const files = getChangedFiles('${{ inputs.base_ref }}', '${{ inputs.head_ref }}', { cwd: '.' });
+            const result = checkCarveOut(files);
+            console.log(JSON.stringify(result));
+            require('fs').appendFileSync(process.env.GITHUB_OUTPUT, 'allowed=' + result.allowed + '\n');
+          "
+
+  deploy:
+    needs: carve-out-check
+    if: needs.carve-out-check.outputs.allowed == 'true'
+    # Intentionally unconfigured -- see the note at the top of this file.
+    # This job will not run anywhere until a `mika-fastpath-prod` runner
+    # exists, which is a deliberate, separate decision outside this PR.
+    runs-on: [self-hosted, mika-fastpath-prod]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_ref }}
+      - name: Backend tests
+        run: cd backend && npm ci && npm test
+      - name: Fast-path deploy (build, deploy, health-check, rollback-on-failure, audit)
+        run: node deploy/mika-fastpath/orchestrator.js --base=${{ inputs.base_ref }} --head=${{ inputs.head_ref }} --correlation-id="${{ inputs.correlation_id }}" --admin-request="${{ inputs.admin_request_summary }}" --issue-id="${{ inputs.issue_id }}"
+        env:
+          MULTICA_PROJECT_ID: ${{ secrets.MULTICA_PROJECT_ID }}
+
+  reroute:
+    needs: carve-out-check
+    if: needs.carve-out-check.outputs.allowed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: File a normal issue and post the audit comment (no deploy)
+        run: node deploy/mika-fastpath/orchestrator.js --base=${{ inputs.base_ref }} --head=${{ inputs.head_ref }} --correlation-id="${{ inputs.correlation_id }}" --admin-request="${{ inputs.admin_request_summary }}" --issue-id="${{ inputs.issue_id }}"
+        env:
+          MULTICA_PROJECT_ID: ${{ secrets.MULTICA_PROJECT_ID }}
