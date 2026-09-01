@@ -22,6 +22,9 @@ const { createTtsService } = require('./tts');
 const {
     loadMikaConfig, isMikaConfigured, computeContentHash, buildIssueTitle, selectMikaReply,
 } = require('./mika-bridge');
+const {
+    loadTurnConfig, isTurnConfigured, mintTurnCredentials, otherParty, createCallManager,
+} = require('./calls');
 
 const app = express();
 
@@ -1238,6 +1241,23 @@ app.post('/api/tts', requireAuth, async (req, res) => {
     }
 });
 
+/* VOICE CALLING — TURN credentials (MYAG-218-BE). Config comes from the coturn
+   deployment in MYAG-218-DEVOPS (shared secret / realm / urls via env, never
+   committed); until DEVOPS hands that off, isTurnConfigured() is false and this
+   just tells the client calling isn't available yet instead of minting anything.
+   See calls.js for the actual coturn REST-API-style HMAC credential mechanism. */
+const turnConfig = loadTurnConfig();
+
+// Mints a short-lived (see TURN_CREDENTIAL_TTL_SECONDS, default 10 min) scoped
+// credential for the authenticated user right before they start a call -- never a
+// standing secret the client holds between calls.
+app.post('/api/calls/turn-credentials', requireAuth, (req, res) => {
+    if (!isTurnConfigured(turnConfig)) {
+        return res.status(503).json({ error: 'Voice calling is not available yet.' });
+    }
+    res.json(mintTurnCredentials(turnConfig, req.username));
+});
+
 // Unauthenticated on purpose: the filename is an unguessable random UUID
 // (crypto.randomUUID(), see tts.js), the same "possession of the URL is the
 // access control" pattern already used elsewhere in this app for attachment
@@ -2045,6 +2065,23 @@ const io = new Server(server, {
 
 const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
 redisClient.connect().then(() => console.log('🌪️ Redis connected')).catch(err => console.error(err));
+
+/* VOICE CALLING — signaling state (MYAG-218-BE). All state lives in this one
+   process's memory (see calls.js) since Socket.IO here has no cross-instance
+   adapter, so socket routing is already process-local -- consistent with that.
+   isContact reuses the same friendship table messaging is already gated behind;
+   onCallMissed is the only place a ring-timeout notifies both sides that a call
+   nobody answered is now `missed`, so nothing can stay `ringing` forever. */
+const callManager = createCallManager({
+    getUserSockets,
+    isContact: areFriends,
+    ringTimeoutMs: Number(process.env.CALL_RING_TIMEOUT_MS) > 0 ? Number(process.env.CALL_RING_TIMEOUT_MS) : undefined,
+    onCallMissed: async (call) => {
+        for (const sid of await getUserSockets(call.caller)) io.to(sid).emit('call:missed', { callId: call.callId });
+        for (const sid of await getUserSockets(call.callee)) io.to(sid).emit('call:missed', { callId: call.callId });
+        logAnalyticsEvent('call_missed', call.caller);
+    },
+});
 
 // Shared by send_private_message/edit_message/delete_message_everyone — holds any
 // payload meant for a currently-offline user until they reconnect. Each payload carries
@@ -3696,6 +3733,72 @@ io.on('connection', (socket) => {
         for (const sid of await getUserSockets(data.targetUsername)) io.to(sid).emit('typing_stop', { sender: socket.username });
     });
 
+    /* VOICE CALLING — signaling (MYAG-218-BE). Audio itself never touches this server
+       (P2P or via the TURN relay from MYAG-218-DEVOPS) -- only offer/answer/ICE
+       envelopes and call-state transitions pass through here, and only between the
+       two participants callManager already knows are on a given callId; a client
+       can't inject signaling into a call it isn't part of. */
+    socket.on('call:invite', async (data, callback) => {
+        if (typeof callback !== 'function') callback = () => {};
+        if (!socket.username) return callback({ ok: false, reason: 'not_authenticated' });
+        const targetUsername = data && data.targetUsername;
+        if (typeof targetUsername !== 'string' || !targetUsername) return callback({ ok: false, reason: 'invalid_target' });
+        try {
+            const result = await callManager.inviteCall(socket.username, targetUsername);
+            if (!result.ok) return callback(result);
+            for (const sid of await getUserSockets(targetUsername)) {
+                io.to(sid).emit('call:invite', { callId: result.call.callId, caller: socket.username });
+            }
+            logAnalyticsEvent('call_invited', socket.username);
+            callback({ ok: true, callId: result.call.callId });
+        } catch (err) {
+            console.error('call:invite failed:', err.message);
+            callback({ ok: false, reason: 'error' });
+        }
+    });
+
+    socket.on('call:accept', async (data) => {
+        if (!socket.username || !data || !data.callId) return;
+        const result = callManager.acceptCall(data.callId, socket.username);
+        if (!result.ok) return;
+        for (const sid of await getUserSockets(result.call.caller)) io.to(sid).emit('call:accepted', { callId: result.call.callId });
+        logAnalyticsEvent('call_accepted', socket.username);
+    });
+
+    socket.on('call:decline', async (data) => {
+        if (!socket.username || !data || !data.callId) return;
+        const result = callManager.declineCall(data.callId, socket.username);
+        if (!result.ok) return;
+        for (const sid of await getUserSockets(result.call.caller)) io.to(sid).emit('call:declined', { callId: result.call.callId });
+        logAnalyticsEvent('call_declined', socket.username);
+    });
+
+    socket.on('call:end', async (data) => {
+        if (!socket.username || !data || !data.callId) return;
+        const result = callManager.endCall(data.callId, socket.username);
+        if (!result.ok) return;
+        const target = otherParty(result.call, socket.username);
+        for (const sid of await getUserSockets(target)) io.to(sid).emit('call:ended', { callId: result.call.callId, status: result.call.status });
+        logAnalyticsEvent('call_ended', socket.username);
+    });
+
+    // Offer/answer/ICE all share the same shape of guard: the callId must be a call
+    // this socket's user is actually part of, and it's relayed only to the other
+    // participant -- never to whatever target a client might claim.
+    function relayToCallPeer(event) {
+        return async (data) => {
+            if (!socket.username || !data || !data.callId) return;
+            const call = callManager.getCall(data.callId);
+            const target = otherParty(call, socket.username);
+            if (!target) return;
+            const { callId, sdp, candidate } = data;
+            for (const sid of await getUserSockets(target)) io.to(sid).emit(event, { callId, sdp, candidate });
+        };
+    }
+    socket.on('call:offer', relayToCallPeer('call:offer'));
+    socket.on('call:answer', relayToCallPeer('call:answer'));
+    socket.on('call:ice-candidate', relayToCallPeer('call:ice-candidate'));
+
     // Relay read receipts back to the original sender -- same online/offline-queue
     // pattern as messages/edits/deletes/reactions below. Previously this only ever
     // reached the sender if they happened to be online at the exact moment the
@@ -3740,6 +3843,17 @@ io.on('connection', (socket) => {
                     online: false,
                     lastSeen: lastSeenVisible ? now : null
                 });
+
+                // Last device gone: don't strand whoever's on the other end of a call
+                // with this user -- end it now rather than leaving them ringing/active
+                // against someone who's no longer reachable.
+                const endedCall = callManager.handleUserDisconnected(socket.username);
+                if (endedCall) {
+                    const target = otherParty(endedCall, socket.username);
+                    for (const sid of await getUserSockets(target)) {
+                        io.to(sid).emit('call:ended', { callId: endedCall.callId, status: endedCall.status });
+                    }
+                }
             }
 
             console.log(`🏃 User ${socket.username} has disconnected (${remainingSockets} device(s) still online).`);
