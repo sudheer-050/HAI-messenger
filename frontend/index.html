@@ -739,7 +739,25 @@
         .chat-area.status-aux-mode #statusAuxView,
         .chat-area.hai-aux-mode #haiActionsAuxView,
         .chat-area.mika-aux-mode #mikaAuxView,
-        .chat-area.mikaDenied-aux-mode #mikaDeniedAuxView { display: flex; }
+        .chat-area.mikaDenied-aux-mode #mikaDeniedAuxView,
+        .chat-area.call-aux-mode #callAuxView { display: flex; }
+
+        .call-header-btn { display: none; }
+        .call-header-btn.is-available { display: inline-flex; }
+        .call-card { align-items: center; justify-content: center; text-align: center; padding: 32px 20px; }
+        .call-stage { width: min(100%, 420px); margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+        .call-avatar { width: 104px; height: 104px; border-radius: 50%; background: var(--accent-brand); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 38px; font-weight: 700; background-position: center; background-size: cover; box-shadow: 0 14px 40px rgba(68, 54, 170, .25); }
+        .call-peer-name { margin: 4px 0 0; font-size: clamp(24px, 6vw, 34px); color: var(--text-normal); }
+        .call-status { min-height: 24px; color: var(--text-muted); font-weight: 600; }
+        .call-duration { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+        .call-actions { display: flex; justify-content: center; gap: 22px; margin-top: 18px; }
+        .call-control { width: 62px; height: 62px; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: rgba(127,127,127,.16); color: var(--text-normal); }
+        .call-control .icon { width: 25px; height: 25px; }
+        .call-control.danger { background: var(--accent-red); color: #fff; }
+        .call-control.accept { background: #27ae60; color: #fff; }
+        .call-control.is-active { background: var(--accent-brand); color: #fff; }
+        .call-control-label { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 12px; color: var(--text-muted); }
+        @media (max-width: 768px) { .call-card { padding-top: calc(34px + env(safe-area-inset-top)); padding-bottom: calc(28px + env(safe-area-inset-bottom)); } }
 
         .friend-request-row {
             display: flex;
@@ -4154,6 +4172,7 @@
                 <h2 style="margin: 0;">Select a conversation to start chatting</h2>
             </div>
             <div class="chat-header-actions">
+                <button type="button" id="callHeaderBtn" class="chat-header-menu-btn call-header-btn" data-icon="phone" onclick="startOutgoingCall()" title="Voice call" aria-label="Start voice call"></button>
                 <button type="button" id="chatMoreMenuBtn" class="chat-header-menu-btn" data-icon="more" onclick="toggleHeaderMenu(event)"></button>
                 <div class="header-menu-dropdown" id="headerMenuDropdown">
                     <button type="button" onclick="headerMenuViewProfile()" id="headerMenuViewProfileBtn">View Profile</button>
@@ -4573,6 +4592,19 @@
                 </div>
             </div>
         </div>
+
+        <div class="chat-area-aux-view" id="callAuxView" role="dialog" aria-modal="true" aria-labelledby="callPeerName">
+            <div class="trash-card call-card">
+                <div class="call-stage">
+                    <div class="call-avatar" id="callAvatar"></div>
+                    <h2 class="call-peer-name" id="callPeerName">Voice call</h2>
+                    <div class="call-status" id="callStatus" aria-live="assertive">Connecting…</div>
+                    <div class="call-duration" id="callDuration" style="display:none;">00:00</div>
+                    <div class="call-actions" id="callActions"></div>
+                    <audio id="callRemoteAudio" autoplay playsinline></audio>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -4971,6 +5003,9 @@
     // startChatSession() right after loadProfileStore() — see applyLoggedInProfile's note.
     let pendingProfileMergeData = null;
     let currentActiveUser = "";
+    // Voice-call media is deliberately kept outside conversationHistory: signaling
+    // metadata is transient and no audio or call content is ever persisted/logged.
+    let voiceCall = null; // { id, peer, direction, phase, pc, stream, candidates, startedAt, durationTimer, muted }
     let activeVoiceNoteAudio = null; // currently playing inline voice-note Audio object
     let unreadChats = [];
     // Richer than unreadChats (which only ever meant "unread message"): tracks WHAT
@@ -7073,6 +7108,7 @@
         close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
         paperclip: '<path d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/>',
         mic: '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
+        phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.8a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.33 1.85.56 2.81.69A2 2 0 0 1 22 16.92z"/>',
         smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>',
         camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
         reply: '<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
@@ -10824,6 +10860,50 @@ void main(){
                 updateStatusFabState();
             });
 
+            socket.on('call:invite', data => {
+                const peer = callPeerFrom(data);
+                const callId = callIdFrom(data);
+                if (!peer || !callId || !friendsSet.has(peer)) return;
+                if (voiceCall) { socket.emit('call:decline', { callId, targetUsername: peer, reason: 'busy' }); return; }
+                voiceCall = { id: callId, peer, direction: 'incoming', phase: 'incoming', pc: null, stream: null, candidates: [], startedAt: 0, durationTimer: null, muted: false };
+                openAuxPanel('call');
+                setCallStatus('Incoming voice call'); renderCallView(); updateCallHeaderButton();
+                if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
+            });
+            socket.on('call:accept', data => {
+                if (!voiceCall || voiceCall.direction !== 'outgoing') return;
+                voiceCall.id = callIdFrom(data) || voiceCall.id;
+                voiceCall.phase = 'connecting'; setCallStatus('Connecting…'); renderCallView();
+                createAndSendOffer();
+            });
+            socket.on('call:decline', data => { if (voiceCall && (!callIdFrom(data) || callIdFrom(data) === voiceCall.id)) endVoiceCall(false, data && data.reason === 'busy' ? 'Contact is already in another call.' : 'Call declined.'); });
+            socket.on('call:timeout', data => { if (voiceCall && (!callIdFrom(data) || callIdFrom(data) === voiceCall.id)) endVoiceCall(false, 'No answer.'); });
+            socket.on('call:missed', data => { if (voiceCall && (!callIdFrom(data) || callIdFrom(data) === voiceCall.id)) endVoiceCall(false, 'No answer.'); });
+            socket.on('call:error', data => { if (voiceCall && (!callIdFrom(data) || callIdFrom(data) === voiceCall.id)) endVoiceCall(false, (data && (data.error || data.message)) || 'Call could not be completed.'); });
+            socket.on('call:end', data => { if (voiceCall && (!callIdFrom(data) || callIdFrom(data) === voiceCall.id)) endVoiceCall(false, 'Call ended'); });
+            socket.on('call:offer', async data => {
+                if (!voiceCall || (callIdFrom(data) && callIdFrom(data) !== voiceCall.id)) return;
+                try {
+                    const pc = await ensureCallPeerConnection();
+                    await pc.setRemoteDescription(data.offer || data.sdp);
+                    await flushCallCandidates(pc);
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    socket.emit('call:answer', callSignalPayload({ answer: pc.localDescription, sdp: pc.localDescription }));
+                } catch (err) { endVoiceCall(true, err.message); }
+            });
+            socket.on('call:answer', async data => {
+                if (!voiceCall || (callIdFrom(data) && callIdFrom(data) !== voiceCall.id)) return;
+                try { const pc = await ensureCallPeerConnection(); await pc.setRemoteDescription(data.answer || data.sdp); await flushCallCandidates(pc); }
+                catch (err) { endVoiceCall(true, err.message); }
+            });
+            socket.on('call:ice-candidate', async data => {
+                if (!voiceCall || !data || !data.candidate || (callIdFrom(data) && callIdFrom(data) !== voiceCall.id)) return;
+                if (!voiceCall.pc || !voiceCall.pc.remoteDescription) voiceCall.candidates.push(data.candidate);
+                else await voiceCall.pc.addIceCandidate(data.candidate).catch(() => {});
+            });
+            socket.on('disconnect', () => { if (voiceCall) endVoiceCall(false, 'Connection lost. Call ended.'); });
+
             // MIKA ADMIN CHAT (MYAG-195) — server-pushed reply to a message sent via
             // POST /api/admin/mika/message (see submitMikaMessage). Plain-text only,
             // no encryption/decryption involved, unlike every other socket message
@@ -11057,6 +11137,7 @@ void main(){
             socket.on('friend_request_accepted', (data) => {
                 outgoingFriendRequests = outgoingFriendRequests.filter(r => r.username !== data.byUsername);
                 friendsSet.add(data.byUsername);
+                updateCallHeaderButton();
                 updateFriendRequestsBadge();
                 if (document.getElementById('friendsAuxView') && document.getElementById('chatPanel').classList.contains('friends-aux-mode')) renderFriendRequests();
                 if (currentActiveUser === data.byUsername) refreshFriendGateForActiveChat();
@@ -11077,6 +11158,7 @@ void main(){
 
             socket.on('friend_removed', (data) => {
                 friendsSet.delete(data.byUsername);
+                updateCallHeaderButton();
                 if (currentActiveUser === data.byUsername) refreshFriendGateForActiveChat();
                 renderSidebarContacts();
             });
@@ -11372,6 +11454,151 @@ void main(){
         input.focus();
     }
 
+    /* VOICE CALLING — transient WebRTC media/signaling state in its own aux view. */
+    function callPeerFrom(data) {
+        return String((data && (data.peer || data.username || data.callerUsername || data.fromUsername || data.from || data.targetUsername)) || '').toLowerCase();
+    }
+    function callIdFrom(data) { return data && (data.callId || data.id); }
+    function callSignalPayload(extra) {
+        return Object.assign({ callId: voiceCall && voiceCall.id, targetUsername: voiceCall && voiceCall.peer }, extra || {});
+    }
+    function updateCallHeaderButton() {
+        const btn = document.getElementById('callHeaderBtn');
+        if (!btn) return;
+        const available = !!(currentActiveUser && !isGroupChatKey(currentActiveUser) && friendsSet.has(currentActiveUser) && !voiceCall);
+        btn.classList.toggle('is-available', available);
+        btn.disabled = !available;
+    }
+    function setCallStatus(text) {
+        const el = document.getElementById('callStatus');
+        if (el) el.textContent = text;
+    }
+    function renderCallView() {
+        if (!voiceCall) return;
+        const profile = getKnownProfile(voiceCall.peer);
+        const avatar = document.getElementById('callAvatar');
+        avatar.textContent = profile && profile.avatar ? '' : voiceCall.peer.charAt(0).toUpperCase();
+        avatar.style.backgroundImage = profile && profile.avatar ? `url('${profile.avatar}')` : '';
+        document.getElementById('callPeerName').textContent = voiceCall.peer;
+        document.getElementById('callDuration').style.display = voiceCall.phase === 'active' ? 'block' : 'none';
+        const actions = document.getElementById('callActions');
+        if (voiceCall.phase === 'incoming') {
+            actions.innerHTML = `<span class="call-control-label"><button type="button" class="call-control danger" onclick="declineIncomingCall()" aria-label="Decline call">${icon('phone')}</button>Decline</span><span class="call-control-label"><button type="button" class="call-control accept" onclick="acceptIncomingCall()" aria-label="Accept call">${icon('phone')}</button>Accept</span>`;
+        } else if (voiceCall.phase === 'active') {
+            actions.innerHTML = `<span class="call-control-label"><button type="button" class="call-control ${voiceCall.muted ? 'is-active' : ''}" onclick="toggleCallMute()" aria-label="${voiceCall.muted ? 'Unmute' : 'Mute'} microphone">${icon(voiceCall.muted ? 'muteOff' : 'mic')}</button>${voiceCall.muted ? 'Unmute' : 'Mute'}</span><span class="call-control-label"><button type="button" class="call-control danger" onclick="endVoiceCall(true)" aria-label="End call">${icon('phone')}</button>End</span>`;
+        } else {
+            actions.innerHTML = `<span class="call-control-label"><button type="button" class="call-control danger" onclick="endVoiceCall(true)" aria-label="Cancel call">${icon('phone')}</button>Cancel</span>`;
+        }
+    }
+    async function getCallMedia() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('unsupported');
+        try { return await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
+        catch (err) { throw new Error(err && (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : 'unavailable'); }
+    }
+    async function getCallIceServers() {
+        const data = await authFetchJSON('/api/calls/turn-credentials', 'POST');
+        if (Array.isArray(data.iceServers)) return data.iceServers;
+        const urls = data.urls || data.url || data.uris;
+        if (!urls) throw new Error('TURN server configuration is unavailable.');
+        return [{ urls, username: data.username, credential: data.credential || data.password }];
+    }
+    async function ensureCallPeerConnection() {
+        if (!voiceCall) throw new Error('Call ended.');
+        if (voiceCall.pc) return voiceCall.pc;
+        const iceServers = await getCallIceServers();
+        if (!voiceCall) throw new Error('Call ended.');
+        const pc = new RTCPeerConnection({ iceServers });
+        voiceCall.pc = pc;
+        if (!voiceCall.stream) voiceCall.stream = await getCallMedia();
+        voiceCall.stream.getTracks().forEach(track => pc.addTrack(track, voiceCall.stream));
+        pc.ontrack = event => { document.getElementById('callRemoteAudio').srcObject = event.streams[0]; };
+        pc.onicecandidate = event => { if (event.candidate && voiceCall) socket.emit('call:ice-candidate', callSignalPayload({ candidate: event.candidate })); };
+        pc.onconnectionstatechange = () => {
+            if (!voiceCall || voiceCall.pc !== pc) return;
+            if (pc.connectionState === 'connected') activateVoiceCall();
+            else if (pc.connectionState === 'disconnected') setCallStatus('Reconnecting…');
+            else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') endVoiceCall(false, 'Call ended');
+            else setCallStatus('Connecting…');
+        };
+        return pc;
+    }
+    async function flushCallCandidates(pc) {
+        if (!voiceCall || !pc.remoteDescription) return;
+        for (const candidate of voiceCall.candidates.splice(0)) await pc.addIceCandidate(candidate).catch(() => {});
+    }
+    async function startOutgoingCall() {
+        const peer = currentActiveUser;
+        if (!peer || isGroupChatKey(peer) || !friendsSet.has(peer) || voiceCall) return;
+        voiceCall = { id: null, peer, direction: 'outgoing', phase: 'outgoing', pc: null, stream: null, candidates: [], startedAt: 0, durationTimer: null, muted: false };
+        openAuxPanel('call');
+        setCallStatus(`Calling ${peer}…`);
+        renderCallView();
+        updateCallHeaderButton();
+        try {
+            voiceCall.stream = await getCallMedia();
+            socket.emit('call:invite', { targetUsername: peer }, acknowledgement => {
+                if (!voiceCall || voiceCall.peer !== peer || !acknowledgement) return;
+                if (acknowledgement.error) return endVoiceCall(false, acknowledgement.error);
+                voiceCall.id = callIdFrom(acknowledgement) || voiceCall.id;
+            });
+        } catch (err) {
+            endVoiceCall(false, err.message === 'denied' ? 'Microphone access denied. Allow microphone access to make a call.' : 'Microphone is unavailable on this device.');
+        }
+    }
+    async function acceptIncomingCall() {
+        if (!voiceCall || voiceCall.phase !== 'incoming') return;
+        try {
+            voiceCall.stream = await getCallMedia();
+            voiceCall.phase = 'connecting';
+            setCallStatus('Connecting…'); renderCallView();
+            socket.emit('call:accept', callSignalPayload());
+        } catch (err) {
+            socket.emit('call:decline', callSignalPayload({ reason: 'microphone_unavailable' }));
+            endVoiceCall(false, err.message === 'denied' ? 'Microphone access denied. Allow microphone access to answer calls.' : 'Microphone is unavailable on this device.');
+        }
+    }
+    function declineIncomingCall() { if (voiceCall) socket.emit('call:decline', callSignalPayload()); endVoiceCall(false); }
+    async function createAndSendOffer() {
+        try {
+            const pc = await ensureCallPeerConnection();
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('call:offer', callSignalPayload({ offer: pc.localDescription, sdp: pc.localDescription }));
+        } catch (err) { endVoiceCall(true, err.message); }
+    }
+    function activateVoiceCall() {
+        if (!voiceCall) return;
+        voiceCall.phase = 'active';
+        if (!voiceCall.startedAt) voiceCall.startedAt = Date.now();
+        setCallStatus('Connected'); renderCallView();
+        clearInterval(voiceCall.durationTimer);
+        voiceCall.durationTimer = setInterval(() => {
+            if (!voiceCall) return;
+            const seconds = Math.floor((Date.now() - voiceCall.startedAt) / 1000);
+            document.getElementById('callDuration').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+        }, 1000);
+    }
+    function toggleCallMute() {
+        if (!voiceCall || !voiceCall.stream) return;
+        voiceCall.muted = !voiceCall.muted;
+        voiceCall.stream.getAudioTracks().forEach(track => { track.enabled = !voiceCall.muted; });
+        renderCallView();
+    }
+    function endVoiceCall(notifyPeer, message) {
+        const ended = voiceCall;
+        if (!ended) { if (message) showToast(message, 'error'); return; }
+        voiceCall = null;
+        if (notifyPeer && socket) socket.emit('call:end', { callId: ended.id, targetUsername: ended.peer });
+        clearInterval(ended.durationTimer);
+        if (ended.stream) ended.stream.getTracks().forEach(track => track.stop());
+        if (ended.pc) { ended.pc.onconnectionstatechange = null; ended.pc.ontrack = null; ended.pc.onicecandidate = null; ended.pc.close(); }
+        const audio = document.getElementById('callRemoteAudio');
+        if (audio) { audio.pause(); audio.srcObject = null; }
+        if (activeAuxPanel === 'call') closeAuxPanel();
+        updateCallHeaderButton();
+        if (message) showToast(message, 'info');
+    }
+
     function handleEmojiPickerSelection(emojiChar) {
         if (emojiPickerReactionTarget) {
             const targetId = emojiPickerReactionTarget;
@@ -11389,6 +11616,7 @@ void main(){
         if (aiVoiceFlow) cancelAiVoiceFlow();
         if (globalVoiceControl) stopGlobalVoiceControl();
         fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+        if (voiceCall) endVoiceCall(true);
         if (socket) {
             socket.disconnect();
         }
@@ -12211,6 +12439,7 @@ void main(){
             incomingFriendRequests = (data.incoming || []).map(r => ({ requestId: r.requestId, username: r.username, note: r.note || null }));
             outgoingFriendRequests = (data.outgoing || []).map(r => ({ requestId: r.requestId, username: r.username, note: r.note || null }));
             updateFriendRequestsBadge();
+            updateCallHeaderButton();
         } catch (err) {
             console.error('loadFriendsData failed:', err.message);
         }
@@ -16372,7 +16601,7 @@ void main(){
     /* IN-PANEL AUX VIEWS — Profile/Trash/Settings open by replacing chatPanel's normal
        content (same panel, same mobile open/close animation) instead of a floating
        modal, matching how a regular chat or Nearby match opens. */
-    const AUX_PANEL_KINDS = ['profile', 'trash', 'settings', 'friends', 'status', 'groupinfo', 'hai', 'mika', 'mikaDenied'];
+    const AUX_PANEL_KINDS = ['profile', 'trash', 'settings', 'friends', 'status', 'groupinfo', 'hai', 'mika', 'mikaDenied', 'call'];
     function openAuxPanel(kind) {
         const panel = document.getElementById('chatPanel');
         // Only one aux view can ever be visible at once -- switching straight from one
@@ -16564,6 +16793,7 @@ void main(){
         if (isGroup) document.getElementById('chatPanel').classList.remove('friend-gate-active');
         else refreshFriendGateForActiveChat();
         renderSidebarContacts();
+        updateCallHeaderButton();
         reloadChatHistoryScreen(true);
         animateChatOpen(originRect);
     }
