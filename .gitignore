@@ -5,3 +5,4 @@ node_modules/
 Thumbs.db
 cloudflared/*.json
 cloudflared/cert.pem
+deploy/mika-fastpath/.audit-outbox/

@@ -25,6 +25,7 @@ function formatAuditComment({
     healthCheck = null,
     rollbackHealthCheck = null,
     rollbackError = null,
+    rerouteError = null,
     error = null,
 }) {
     const lines = [];
@@ -52,7 +53,13 @@ function formatAuditComment({
         lines.push('**Blocked by the crypto/secrets carve-out:**');
         for (const f of blockedFiles) lines.push(`- \`${f}\``);
         lines.push('');
-        lines.push('A normal issue has been filed for a human/specialist to handle this change through the standard review pipeline. Nothing was built or deployed.');
+        if (rerouteError) {
+            lines.push(`**The normal-review issue could NOT be filed automatically:** ${rerouteError}`);
+            lines.push('');
+            lines.push('This change was still blocked and nothing was built or deployed, but a human needs to manually file the reroute issue -- it was not created.');
+        } else {
+            lines.push('A normal issue has been filed for a human/specialist to handle this change through the standard review pipeline. Nothing was built or deployed.');
+        }
     }
 
     if (outcome === 'deployed') {
@@ -136,4 +143,33 @@ async function fileNormalIssue({ cliPath = 'multica', title, descriptionPath, pr
     return runMulticaCli(cliPath, args);
 }
 
-module.exports = { formatAuditComment, postAuditComment, fileNormalIssue, runMulticaCli };
+// Last-resort durable record for when the audit comment itself could not be
+// posted to Multica (CLI outage, bad issue id, timeout, ...). MYAG-194's
+// acceptance criterion is "every fast-path attempt produces an auditable
+// record" -- if the platform is unreachable that has to degrade to a local
+// file an operator can find and replay, not silence (MYAG-205).
+const DEFAULT_OUTBOX_DIR = path.join(__dirname, '.audit-outbox');
+
+function writeAuditOutbox({ correlationId, issueId, body, postError, outboxDir = DEFAULT_OUTBOX_DIR }) {
+    fs.mkdirSync(outboxDir, { recursive: true });
+    const outboxPath = path.join(
+        outboxDir,
+        `${Date.now()}-${(correlationId || 'unknown').replace(/[^a-zA-Z0-9._-]/g, '_')}.md`
+    );
+    const record = [
+        '<!--',
+        ' Mika fast-path audit record that could NOT be delivered to Multica.',
+        ` issueId: ${issueId || '(unknown)'}`,
+        ` correlationId: ${correlationId || '(unknown)'}`,
+        ` capturedAt: ${new Date().toISOString()}`,
+        ` postError: ${postError || '(unknown)'}`,
+        '-->',
+        '',
+        body,
+        '',
+    ].join('\n');
+    fs.writeFileSync(outboxPath, record, 'utf8');
+    return outboxPath;
+}
+
+module.exports = { formatAuditComment, postAuditComment, fileNormalIssue, runMulticaCli, writeAuditOutbox };
