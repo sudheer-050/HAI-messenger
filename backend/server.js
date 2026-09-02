@@ -1164,6 +1164,9 @@ const H_SYSTEM_PROMPT = 'You are H, a friendly AI assistant on the HAI Messenger
     'this format, JSON, or the emotion tag -- it should read exactly like normal spoken conversation.';
 const H_MAX_HISTORY_TURNS = 12; // caps request size/latency, not a hard product limit
 const H_MAX_GLOSSARY_TERMS = 40;
+const KOKORO_TTS_URL = (process.env.KOKORO_TTS_URL || 'http://kokoro-tts:8880').replace(/\/$/, '');
+const KOKORO_TTS_VOICE = process.env.KOKORO_TTS_VOICE || 'af_heart';
+const KOKORO_TTS_MAX_BYTES = Number(process.env.KOKORO_TTS_MAX_BYTES) || 5 * 1024 * 1024;
 
 async function fetchWithTimeout(url, opts, timeoutMs) {
     const controller = new AbortController();
@@ -1173,6 +1176,32 @@ async function fetchWithTimeout(url, opts, timeoutMs) {
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function synthesizeKokoroSpeech(text) {
+    const response = await fetchWithTimeout(`${KOKORO_TTS_URL}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'kokoro', input: text, voice: KOKORO_TTS_VOICE, response_format: 'mp3' }),
+    }, 20000);
+    if (!response.ok) throw new Error(`Kokoro responded ${response.status}`);
+    const declaredSize = Number(response.headers.get('content-length'));
+    if (declaredSize && declaredSize > KOKORO_TTS_MAX_BYTES) throw new Error('Kokoro audio exceeds size limit');
+
+    const chunks = [];
+    let size = 0;
+    const reader = response.body.getReader();
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > KOKORO_TTS_MAX_BYTES) {
+            await reader.cancel();
+            throw new Error('Kokoro audio exceeds size limit');
+        }
+        chunks.push(Buffer.from(value));
+    }
+    return { mimeType: 'audio/mpeg', encoding: 'base64', data: Buffer.concat(chunks).toString('base64') };
 }
 
 // Tries every configured Ollama endpoint in order (local docker path, then the
@@ -1256,7 +1285,7 @@ app.get('/api/h-audio/:filename', async (req, res) => {
 });
 
 app.post('/api/h-chat', ipLimitHChat, async (req, res) => {
-    const { message, history, glossary } = req.body || {};
+    const { message, history, glossary, voice } = req.body || {};
     if (typeof message !== 'string' || !message.trim()) {
         return res.status(400).json({ error: 'Message is required.' });
     }
@@ -1312,7 +1341,15 @@ app.post('/api/h-chat', ipLimitHChat, async (req, res) => {
             // Not valid JSON despite the format constraint -- use the raw text as-is.
         }
 
-        res.json({ reply, emotion });
+        let audio;
+        if (voice === true) {
+            try {
+                audio = await synthesizeKokoroSpeech(reply);
+            } catch (ttsErr) {
+                console.warn('Kokoro TTS unavailable; returning text-only H reply:', ttsErr.message);
+            }
+        }
+        res.json({ reply, emotion, ...(audio ? { audio } : {}) });
     } catch (err) {
         console.error('h-chat failed:', err.message);
         res.status(502).json({ error: "H's offline right now -- try again in a moment." });
