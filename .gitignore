@@ -6,3 +6,4 @@ Thumbs.db
 cloudflared/*.json
 cloudflared/cert.pem
 backend/.mika-tmp/
+deploy/mika-fastpath/.audit-outbox/

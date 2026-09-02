@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Fake `multica` CLI for the orchestrator e2e test (MYAG-204). Logs every
+# invocation -- including the content of any --content-file/--description-file
+# argument -- to $FAKE_MULTICA_LOG so the test can assert on what the
+# orchestrator actually reported, without making real Multica API calls.
+#
+# Failure injection (MYAG-205): set FAKE_MULTICA_FAIL_ON to a substring of
+# the invocation (e.g. "issue create" or "issue comment add") to make this
+# specific subcommand fail instead of the default always-succeeds behavior,
+# simulating a CLI/API outage so tests can prove the orchestrator's audit
+# trail survives it instead of silently losing the attempt.
+set -euo pipefail
+
+LOG="${FAKE_MULTICA_LOG:?FAKE_MULTICA_LOG must be set}"
+
+{
+    echo "=== multica $* ==="
+    for a in "$@"; do
+        if [ -f "$a" ]; then
+            echo "--- file: $a ---"
+            cat "$a"
+        fi
+    done
+} >> "$LOG"
+
+invocation="$*"
+if [ -n "${FAKE_MULTICA_FAIL_ON:-}" ] && [[ "$invocation" == *"${FAKE_MULTICA_FAIL_ON}"* ]]; then
+    echo "fake multica: injected failure for '$FAKE_MULTICA_FAIL_ON'" >&2
+    exit 7
+fi
+
+exit 0
