@@ -1,0 +1,12 @@
+{
+  "name": "hai-chrome-beta-smoke",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Reusable Chrome Beta smoke gate for HAI's browser-critical PWA paths (MYAG-238/MYAG-239). Not part of the app build.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}
