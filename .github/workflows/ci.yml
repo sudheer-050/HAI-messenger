@@ -1,0 +1,67 @@
+name: CI
+
+# Runs the test suites that already exist in this repo (backend, both
+# frontend parsers, mika-fastpath) on every PR and push to master. Until now
+# these only ran manually/locally -- the PR Review & Merge Gatekeeper agent's
+# own instructions note "this repo has no CI, you are the safety net"; this
+# gives it real test results to check instead of relying on review alone.
+#
+# Separate from deploy/mika-fastpath/ci/mika-fastpath.workflow.yml, which is
+# a deliberately-unwired, manually-dispatched admin-approved deploy pipeline
+# (see its own header comment) -- not touched here.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install
+        working-directory: backend
+        run: npm ci
+      - name: Test
+        working-directory: backend
+        run: npm test
+
+  frontend-hai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test (no runtime dependencies)
+        working-directory: frontend/hai
+        run: npm test
+
+  frontend-voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test (no runtime dependencies)
+        working-directory: frontend/voice
+        run: npm test
+
+  mika-fastpath:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unit + integration + e2e tests
+        # All fakes/mocks (fake docker CLI, locally-spawned processes) -- no
+        # real docker socket needed, see deploy/mika-fastpath/README.md
+        # "What's verified vs. not".
+        run: node --test deploy/mika-fastpath/*.unit.test.js deploy/mika-fastpath/test/*.test.js
