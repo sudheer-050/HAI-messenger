@@ -131,6 +131,39 @@ services:
       - backend
       - analyst
 
+  # Self-hosted STUN/TURN for voice calling (MYAG-219) -- keeps NAT traversal
+  # in-house instead of a third-party TURN service, consistent with this
+  # app's "no third-party servers" positioning. host networking is used
+  # (rather than a long list of published port ranges) because coturn needs
+  # the whole min-port..max-port relay range reachable directly; UFW on the
+  # host is what actually restricts this to the ports in turnserver.conf --
+  # see coturn/turnserver.conf for the port list and relay-abuse hardening.
+  #
+  # Credentials are never static: TURN_SHARED_SECRET here is used only to
+  # verify/mint short-lived (~10 min) HMAC credentials server-side (coturn's
+  # REST API mechanism) -- it is never sent to a client. Backend
+  # (MYAG-218-BE) needs the same secret + realm to mint matching credentials.
+  coturn:
+    image: coturn/coturn:4.6.2
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      - TURN_SHARED_SECRET=${TURN_SHARED_SECRET}
+      - TURN_REALM=${TURN_REALM:-turn.myhai.org}
+      # Public IP NATed clients must dial to reach this host's relay --
+      # myserver has no public IP of its own (home-router NAT). Must be kept
+      # current if the ISP's assigned IP changes; see coturn/README.md.
+      - TURN_EXTERNAL_IP=${TURN_EXTERNAL_IP}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        exec turnserver -c /etc/coturn/turnserver.conf \
+          --realm="$$TURN_REALM" \
+          --static-auth-secret="$$TURN_SHARED_SECRET" \
+          --external-ip="$$TURN_EXTERNAL_IP"
+
 volumes:
   multica_config:
   pgdata:
