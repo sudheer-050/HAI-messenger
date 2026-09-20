@@ -537,11 +537,15 @@ app.get('/api/jobs/resume', requireJobAuth, async (req, res) => {
     res.json({ resume: result.rows[0] || null });
 });
 
-/* ---- Job sourcing: Adzuna (primary, needs a free API key) + RemoteOK (free,
-   no key, remote-only) as a zero-cost secondary. Results are cached in
-   job_postings_cache per normalized role query so N users tracking the same
-   role share one Adzuna call instead of one each -- Adzuna's free tier is
-   only ~1,000 calls/month. ---- */
+/* ---- Job sourcing: Adzuna only. RemoteOK used to be a free zero-key
+   secondary source, but its API never exposes the hiring company's own
+   apply/career-page URL -- both `url` and `apply_url` on every RemoteOK
+   record just point back to remoteok.com's own listing page. Since the
+   whole point of applyUrl is to send the user straight to the company,
+   not to an aggregator, RemoteOK can't satisfy that and was dropped.
+   Results are cached in job_postings_cache per normalized role query so
+   N users tracking the same role share one Adzuna call instead of one
+   each -- Adzuna's free tier is only ~1,000 calls/month. ---- */
 const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID || null;
 const ADZUNA_APP_KEY = process.env.ADZUNA_APP_KEY || null;
 const JOB_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -586,51 +590,14 @@ async function fetchAdzunaJobs(roleQuery, location) {
     }
 }
 
-async function fetchRemoteOkJobs(roleQuery) {
-    try {
-        const res = await fetchWithTimeout('https://remoteok.com/api', { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
-        if (!res.ok) throw new Error(`RemoteOK responded ${res.status}`);
-        const data = await res.json();
-        // Matching the whole role phrase verbatim (e.g. "machine learning
-        // engineer") almost never hits a real title/tag string -- match if any
-        // significant word from the role appears instead, for real recall.
-        const needleWords = roleQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-        return (Array.isArray(data) ? data : [])
-            .filter(j => j && j.id && j.position)
-            .filter(j => {
-                const haystack = `${j.position} ${(j.tags || []).join(' ')}`.toLowerCase();
-                return needleWords.some(w => haystack.includes(w));
-            })
-            .slice(0, 20)
-            .map(j => ({
-                id: `remoteok:${j.id}`,
-                source: 'remoteok',
-                title: j.position,
-                company: j.company || null,
-                location: j.location || 'Remote',
-                salaryMin: j.salary_min || null,
-                salaryMax: j.salary_max || null,
-                remote: true,
-                description: j.description || '',
-                applyUrl: j.url || j.apply_url,
-            }));
-    } catch (err) {
-        console.warn('RemoteOK fetch failed:', err.message);
-        return [];
-    }
-}
-
 async function ensureJobCacheFresh(role, location) {
     const normalized = normalizeRoleQuery(role);
     const existing = await pgPool.query('SELECT MAX(fetched_at) AS latest FROM job_postings_cache WHERE role_query = $1', [normalized]);
     const latest = existing.rows[0]?.latest;
     if (latest && (Date.now() - new Date(latest).getTime()) < JOB_CACHE_TTL_MS) return;
 
-    const [adzunaJobs, remoteOkJobs] = await Promise.all([
-        fetchAdzunaJobs(normalized, location),
-        fetchRemoteOkJobs(normalized),
-    ]);
-    for (const job of [...adzunaJobs, ...remoteOkJobs]) {
+    const adzunaJobs = await fetchAdzunaJobs(normalized, location);
+    for (const job of adzunaJobs) {
         try {
             await pgPool.query(
                 `INSERT INTO job_postings_cache (id, source, role_query, title, company, location, salary_min, salary_max, remote, description, apply_url, fetched_at)

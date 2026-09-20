@@ -146,6 +146,9 @@
             transition: background 0.15s, color 0.15s;
         }
         .role-chip button:hover { background: var(--accent-red); color: #fff; }
+        .role-chip .role-name { font-weight: 600; }
+        .role-chip .role-meta { color: var(--text-muted); }
+        .role-chip .role-meta::before { content: "·"; margin: 0 6px; color: var(--text-faint); }
         .role-list { display: flex; flex-wrap: wrap; margin-bottom: 2px; }
         .role-list:empty::after { content: "No roles yet — add one below."; color: var(--text-faint); font-size: 12.5px; }
 
@@ -466,10 +469,10 @@
             preferences.forEach(p => {
                 const chip = document.createElement('div');
                 chip.className = 'role-chip';
-                const bits = [p.role];
-                if (p.location) bits.push(p.location);
-                if (p.remotePref && p.remotePref !== 'any') bits.push(p.remotePref);
-                chip.innerHTML = `<span>${bits.map(b => escapeHtml(b)).join(' · ')}</span>`;
+                const meta = [p.location, (p.remotePref && p.remotePref !== 'any') ? p.remotePref : null].filter(Boolean);
+                chip.innerHTML = `<span><span class="role-name">${escapeHtml(p.role)}</span>${
+                    meta.length ? `<span class="role-meta">${meta.map(b => escapeHtml(b)).join(' · ')}</span>` : ''
+                }</span>`;
                 const removeBtn = document.createElement('button');
                 removeBtn.type = 'button';
                 removeBtn.textContent = '×';
