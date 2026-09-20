@@ -7,6 +7,24 @@ Exit:   0 = valid, 1 = invalid
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
+
+
+# Third-party job aggregators/listing sites. apply_url must point to the
+# hiring company's own site or its ATS (Greenhouse, Lever, Workday, etc.) —
+# never back to an aggregator's listing page. Keep in sync with jobboard/app.py.
+BLOCKED_APPLY_DOMAINS = {
+    "linkedin.com", "indeed.com", "ziprecruiter.com", "glassdoor.com",
+    "monster.com", "simplyhired.com", "dice.com", "careerbuilder.com",
+    "snagajob.com", "flexjobs.com", "talent.com", "jooble.org",
+    "adzuna.com", "themuse.com", "wellfound.com", "angel.co",
+    "jobrapido.com", "careerjet.com", "neuvoo.com", "jobs2careers.com",
+}
+
+
+def _is_blocked_apply_domain(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in BLOCKED_APPLY_DOMAINS)
 
 
 REQUIRED_FIELDS = {
@@ -52,6 +70,8 @@ def validate(feed: dict) -> list[str]:
         url = job.get("apply_url", "")
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             errors.append(f"{prefix}: apply_url must be a valid http(s) URL, got {url!r}")
+        elif _is_blocked_apply_domain(url):
+            errors.append(f"{prefix}: apply_url must be the company's own site or ATS, not an aggregator listing ({url!r})")
 
         breakdown = job.get("ats_breakdown", {})
         if not isinstance(breakdown, dict):

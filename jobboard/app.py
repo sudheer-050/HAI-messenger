@@ -1,5 +1,7 @@
 import os
 import time
+from urllib.parse import urlparse
+
 import requests
 from flask import Flask, render_template, jsonify
 
@@ -8,6 +10,22 @@ FEED_URL = os.environ.get(
     "https://raw.githubusercontent.com/sudheer-050/HAI-messenger/master/jobs/feed.json",
 )
 CACHE_TTL = int(os.environ.get("FEED_CACHE_TTL", "300"))
+
+# Third-party job aggregators/listing sites. apply_url must point to the
+# hiring company's own site or its ATS (Greenhouse, Lever, Workday, etc.) —
+# never back to an aggregator's listing page.
+BLOCKED_APPLY_DOMAINS = {
+    "linkedin.com", "indeed.com", "ziprecruiter.com", "glassdoor.com",
+    "monster.com", "simplyhired.com", "dice.com", "careerbuilder.com",
+    "snagajob.com", "flexjobs.com", "talent.com", "jooble.org",
+    "adzuna.com", "themuse.com", "wellfound.com", "angel.co",
+    "jobrapido.com", "careerjet.com", "neuvoo.com", "jobs2careers.com",
+}
+
+
+def _is_blocked_apply_domain(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in BLOCKED_APPLY_DOMAINS)
 
 app = Flask(__name__)
 
@@ -64,6 +82,8 @@ def _validate(raw: dict) -> dict:
             continue
         url = job.get("apply_url", "")
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            continue
+        if _is_blocked_apply_domain(url):
             continue
         if not required.issubset(job.keys()):
             continue

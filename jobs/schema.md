@@ -63,7 +63,7 @@
 | `work_arrangement` | string | yes | `"Remote"`, `"Hybrid"`, or `"Onsite"` |
 | `employment_type` | string | yes | `"Full-time"`, `"Part-time"`, `"Contract"`, or `"Internship"` |
 | `description` | string | yes | Full job description text |
-| `apply_url` | string (URL) | yes | Official company/ATS application URL; must be non-empty `http(s)://` |
+| `apply_url` | string (URL) | yes | Official company/ATS application URL (the hiring company's own site or its ATS, e.g. Greenhouse/Lever/Workday); must be non-empty `http(s)://` and must NOT be a job aggregator listing (LinkedIn, Indeed, ZipRecruiter, Glassdoor, Monster, etc.) |
 | `tailored_resume` | string | yes | Resume text tailored for this job by the Resume Tailor agent |
 | `ats_score` | integer | yes | ATS match score 0–100; must be >= 80 to appear in feed |
 | `ats_breakdown` | object | yes | Sub-scores and keyword analysis (see below) |
@@ -88,8 +88,9 @@ A record is **rejected** (not written to the feed) if any of the following are t
 1. `source_status` is not `"in_review"`
 2. `ats_score` < 80
 3. `apply_url` is missing, empty, or does not start with `http://` or `https://`
-4. Any required field is missing or null
-5. `ats_score` is not an integer in 0–100
+4. `apply_url` points to a job aggregator/listing site rather than the hiring company's own site or ATS (see `jobboard/validate_feed.py` for the blocklist)
+5. Any required field is missing or null
+6. `ats_score` is not an integer in 0–100
 
 ## Upsert semantics
 
@@ -105,3 +106,4 @@ Writers use `source_issue_id` as the stable key:
 - Jobs with `source_status` other than `"in_review"`
 - Jobs with `ats_score` < 80
 - Jobs without a valid official `apply_url`
+- Jobs whose `apply_url` is a job aggregator/listing page instead of the company's own site or ATS

@@ -86,6 +86,30 @@ def test_non_http_apply_url_excluded():
     assert result["jobs"] == []
 
 
+@pytest.mark.parametrize("url", [
+    "https://www.linkedin.com/jobs/view/12345",
+    "https://www.indeed.com/viewjob?jk=abc123",
+    "https://www.ziprecruiter.com/c/Acme/Job/ML-Engineer",
+    "https://www.glassdoor.com/job-listing/ml-engineer-acme",
+])
+def test_aggregator_apply_url_excluded(url):
+    job = _base_job(apply_url=url)
+    result = _validate(_valid_feed(job))
+    assert result["jobs"] == []
+
+
+@pytest.mark.parametrize("url", [
+    "https://acme.com/careers/apply/12345",
+    "https://job-boards.greenhouse.io/acme/jobs/5097883007",
+    "https://jobs.lever.co/acme/abc-def",
+    "https://acme.wd1.myworkdayjobs.com/en-US/careers/job/123",
+])
+def test_company_or_ats_apply_url_included(url):
+    job = _base_job(apply_url=url)
+    result = _validate(_valid_feed(job))
+    assert len(result["jobs"]) == 1
+
+
 def test_missing_required_field_excluded():
     job = _base_job()
     del job["tailored_resume"]
