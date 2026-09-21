@@ -458,11 +458,16 @@ app.get('/api/jobs/auth/me', requireJobAuth, (req, res) => {
 /* ---- Preferences: one row per tracked role, so "add another role" is just
    another INSERT and removing one is just a DELETE. ---- */
 app.get('/api/jobs/preferences', requireJobAuth, async (req, res) => {
-    const result = await pgPool.query(
-        'SELECT id, role, location, remote_pref AS "remotePref", salary_min AS "salaryMin", salary_max AS "salaryMax" FROM job_preferences WHERE username = $1 ORDER BY created_at ASC',
-        [req.jobUsername]
-    );
-    res.json({ preferences: result.rows });
+    try {
+        const result = await pgPool.query(
+            'SELECT id, role, location, remote_pref AS "remotePref", salary_min AS "salaryMin", salary_max AS "salaryMax" FROM job_preferences WHERE username = $1 ORDER BY created_at ASC',
+            [req.jobUsername]
+        );
+        res.json({ preferences: result.rows });
+    } catch (err) {
+        console.error('fetch job preferences failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong fetching preferences.' });
+    }
 });
 
 app.post('/api/jobs/preferences', requireJobAuth, async (req, res) => {
@@ -487,8 +492,13 @@ app.post('/api/jobs/preferences', requireJobAuth, async (req, res) => {
 });
 
 app.delete('/api/jobs/preferences/:id', requireJobAuth, async (req, res) => {
-    await pgPool.query('DELETE FROM job_preferences WHERE id = $1 AND username = $2', [req.params.id, req.jobUsername]);
-    res.json({ ok: true });
+    try {
+        await pgPool.query('DELETE FROM job_preferences WHERE id = $1 AND username = $2', [req.params.id, req.jobUsername]);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('delete job preference failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
 });
 
 /* ---- Resume: PDF (parsed server-side, never written to disk -- memoryStorage
@@ -530,11 +540,16 @@ app.post('/api/jobs/resume', requireJobAuth, jobResumeUpload.single('resume'), a
 });
 
 app.get('/api/jobs/resume', requireJobAuth, async (req, res) => {
-    const result = await pgPool.query(
-        'SELECT original_filename AS "originalFilename", uploaded_at AS "uploadedAt", length(resume_text) AS length FROM resumes WHERE username = $1',
-        [req.jobUsername]
-    );
-    res.json({ resume: result.rows[0] || null });
+    try {
+        const result = await pgPool.query(
+            'SELECT original_filename AS "originalFilename", uploaded_at AS "uploadedAt", length(resume_text) AS length FROM resumes WHERE username = $1',
+            [req.jobUsername]
+        );
+        res.json({ resume: result.rows[0] || null });
+    } catch (err) {
+        console.error('fetch resume failed:', err.message);
+        res.status(500).json({ error: 'Something went wrong fetching your resume.' });
+    }
 });
 
 /* ---- Job sourcing: Adzuna, USAJobs, and Jooble (need free API keys/
