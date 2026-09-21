@@ -1,16 +1,4 @@
 services:
-  local-proxy:
-    image: nginx:alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:80"
-    volumes:
-      - ./local-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - backend
-
   postgres:
     image: postgres:15
     restart: unless-stopped
@@ -18,129 +6,187 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
+    command: redis-server --save 60 1
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   libretranslate:
     image: libretranslate/libretranslate:latest
     restart: unless-stopped
     environment:
-      - LT_LOAD_ONLY=en,es,fr,de,it,pt,ru,zh,ja,ko,ar,hi,bn,ur
-      - LT_UPDATE_MODELS=true
-      - LT_DISABLE_WEB_UI=true
-    ports:
-      - "127.0.0.1:5005:5000"
+      LT_LOAD_ONLY: en,es,fr,de,it,pt,ru,zh,ja,ko,ar,hi,bn,ur
+      LT_UPDATE_MODELS: 'true'
+      LT_DISABLE_WEB_UI: 'true'
     volumes:
       - libretranslate_models:/home/libretranslate/.local
 
-  backend:
-    build: ./backend
-    # Explicit, stable image name/tag -- the Mika fast-path deploy pipeline
-    # (deploy/mika-fastpath/) tags this image as hurricane-backend:last-good
-    # before each fast-path deploy so rollback.sh has a known name to restore,
-    # independent of whatever compose's default per-project image name would
-    # otherwise be.
-    image: hurricane-backend:latest
+  ollama:
+    image: ollama/ollama:latest
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"
+    runtime: nvidia
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./backend:/usr/src/app
-      - ./frontend:/usr/src/app/public   # 🌟 ADD THIS EXACT MOUNT LINE
-      - /usr/src/app/node_modules
-      # Read-only: lets the container's multica CLI authenticate as this PC's
-      # own already-logged-in Multica session instead of needing separate
-      # container credentials. :ro so the container's CLI invocations can't
-      # write into and disturb this PC's live daemon state (daemon.pid, logs).
-      - C:/Users/gsudh/.multica:/root/.multica:ro
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ['CMD', 'ollama', 'list']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.render
+    restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://redis:6379
-      - TRANSLATE_URL=http://libretranslate:5000
-      - RESEND_API_KEY=${RESEND_API_KEY}
-      - JWT_SECRET=${JWT_SECRET}
-      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
-      # Ollama runs on the host (not in a container) -- host.docker.internal is
-      # Docker Desktop's built-in route to it. extra_hosts below makes the same
-      # hostname resolve on Linux Docker hosts too.
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_CHAT_MODEL=llama3.2
-      - KOKORO_TTS_URL=${KOKORO_TTS_URL:-http://kokoro-tts:8880}
-      - KOKORO_TTS_VOICE=${KOKORO_TTS_VOICE:-af_heart}
-      - KOKORO_TTS_MAX_BYTES=${KOKORO_TTS_MAX_BYTES:-5242880}
-      # Mika bridge — admin-only. These three vars must be set in .env for the
-      # /api/admin/mika/message endpoint to be active (503 otherwise). The
-      # backend talks to Multica via the `multica` CLI, not a REST token, so
-      # the CLI itself must separately be installed + authenticated inside
-      # this container (see .env.example for the manual provisioning note).
-      - MULTICA_PROJECT_ID=${MULTICA_PROJECT_ID}
-      - MIKA_AGENT_ID=${MIKA_AGENT_ID}
-      - MIKA_PARENT_ISSUE_ID=${MIKA_PARENT_ISSUE_ID}
-      - MULTICA_WORKSPACE_ID=${MULTICA_WORKSPACE_ID:-}
-      - MULTICA_CLI_PATH=${MULTICA_CLI_PATH:-multica}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      TRANSLATE_URL: http://libretranslate:5000
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
+      BASIC_AUTH_PASS: ${BASIC_AUTH_PASS:-}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_USERNAMES: ${ADMIN_USERNAMES}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.2:3b}
+      H_OLLAMA_TIMEOUT_MS: ${H_OLLAMA_TIMEOUT_MS:-45000}
+      ENABLE_GEMINI_FALLBACK: ${ENABLE_GEMINI_FALLBACK:-false}
+      NODE_ENV: production
+      ENFORCE_HTTPS: ${ENFORCE_HTTPS:-true}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      H_CHAT_RATE_LIMIT: ${H_CHAT_RATE_LIMIT:-10}
+      H_MAX_CONCURRENT_REQUESTS: ${H_MAX_CONCURRENT_REQUESTS:-2}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_CHAT_MODEL: ${GEMINI_CHAT_MODEL}
+      KOKORO_TTS_URL: http://kokoro-tts:8880
+      KOKORO_TTS_VOICE: ${KOKORO_TTS_VOICE:-af_heart}
+      KOKORO_TTS_MAX_BYTES: ${KOKORO_TTS_MAX_BYTES:-5242880}
+      TTS_PROVIDER: ${TTS_PROVIDER:-kokoro}
+      KOKORO_VOICE: ${KOKORO_VOICE:-}
+      KOKORO_VOICE_WARM: ${KOKORO_VOICE_WARM:-af_heart}
+      KOKORO_VOICE_NEUTRAL: ${KOKORO_VOICE_NEUTRAL:-af_nova}
+      KOKORO_VOICE_GENTLE: ${KOKORO_VOICE_GENTLE:-af_nicole}
+      KOKORO_SPEED: ${KOKORO_SPEED:-1.0}
+      H_TTS_MAX_CHARS: ${H_TTS_MAX_CHARS:-1200}
+      H_TTS_MAX_PER_MINUTE: ${H_TTS_MAX_PER_MINUTE:-10}
+      H_TTS_TIMEOUT_MS: ${H_TTS_TIMEOUT_MS:-25000}
+      H_TTS_AUDIO_TTL_HOURS: ${H_TTS_AUDIO_TTL_HOURS:-24}
+      TTS_STORAGE_DIR: /usr/src/app/tts-audio
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      MULTICA_PROJECT_ID: ${MULTICA_PROJECT_ID:-}
+      MIKA_AGENT_ID: ${MIKA_AGENT_ID:-}
+      MIKA_PARENT_ISSUE_ID: ${MIKA_PARENT_ISSUE_ID:-}
+    volumes:
+      - multica_config:/root/.multica
+      - tts_audio:/usr/src/app/tts-audio
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      kokoro-tts:
+        condition: service_started
+    networks:
+      default:
+      ingress:
+        aliases:
+          - ${BACKEND_INGRESS_ALIAS}
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:3000/']
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
-  # Sits between the Cloudflare Tunnel and local Ollama so the Render-hosted
-  # backend can reach this PC's Ollama (private, free) as H's primary source,
-  # falling back to Groq only when this machine/tunnel is unreachable. Ollama
-  # itself has no auth, hence the proxy instead of exposing it directly.
-  ollama-proxy:
-    build: ./ollama-proxy
+  analyst:
+    build:
+      context: /home/bigserver/auto-data-analyst
     restart: unless-stopped
     environment:
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - PROXY_SECRET=${OLLAMA_LOCAL_SECRET}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      SECRET_KEY: ${ANALYST_SECRET_KEY}
+    volumes:
+      - analyst_uploads:/app/uploads
+      - analyst_outputs:/app/outputs
+    networks:
+      default:
+      ingress:
+        aliases:
+          - ${ANALYST_INGRESS_ALIAS}
 
-  jobboard:
-    build: ./jobboard
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5002:5000"
-    environment:
-      - JOBS_FEED_URL=https://raw.githubusercontent.com/sudheer-050/HAI-messenger/master/jobs/feed.json
-      - FEED_CACHE_TTL=300
-
-  # Local Kokoro TTS inference — CPU-only, no cloud dependency.
-  # Internal-only: backend reaches it as http://kokoro-tts:8880.
-  # 127.0.0.1 host port is for manual smoke-testing only.
-  # Voice is set via DEFAULT_VOICE; swap it in .env and restart without
-  # rebuilding. Model weights (~82 MB) are cached in kokoro_models volume.
   kokoro-tts:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2
     restart: unless-stopped
     environment:
-      - DEFAULT_VOICE=${KOKORO_VOICE:-af_heart}
-    ports:
-      - "127.0.0.1:8880:8880"
+      DEFAULT_VOICE: ${KOKORO_VOICE:-af_heart}
     volumes:
       - kokoro_models:/app/models
 
   cloudflared:
     image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
     restart: unless-stopped
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --config /home/nonroot/.cloudflared/config.yml run
     volumes:
-      - ./cloudflared:/home/nonroot/.cloudflared
+      - ./cloudflared:/home/nonroot/.cloudflared:ro
     depends_on:
-      - backend
-      - ollama-proxy
-      - jobboard
+      backend:
+        condition: service_healthy
+      analyst:
+        condition: service_started
+    networks:
+      - default
+      - ingress
+
+networks:
+  ingress:
+    external: true
+    name: hurricane-chat-ingress
 
 volumes:
   pgdata:
+    name: ${PGDATA_VOLUME}
+  redis_data:
+    name: ${REDIS_VOLUME}
   libretranslate_models:
+    name: ${LIBRETRANSLATE_VOLUME}
+  ollama_data:
+    name: ${OLLAMA_VOLUME}
+  multica_config:
+    name: ${MULTICA_VOLUME}
+  analyst_uploads:
+    name: ${ANALYST_UPLOADS_VOLUME}
+  analyst_outputs:
+    name: ${ANALYST_OUTPUTS_VOLUME}
   kokoro_models:
+    name: ${KOKORO_MODELS_VOLUME}
+  tts_audio:
+    name: ${TTS_AUDIO_VOLUME}

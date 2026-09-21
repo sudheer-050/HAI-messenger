@@ -12,9 +12,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [master]
+    branches: [staging, master]
   push:
-    branches: [master]
+    branches: [staging, master]
 
 jobs:
   backend:

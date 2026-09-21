@@ -1,0 +1,40 @@
+name: Deploy
+
+on:
+  push:
+    branches: [staging, master]
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, bigserver]
+    timeout-minutes: 30
+    environment: ${{ github.ref_name == 'master' && 'production' || 'staging' }}
+    steps:
+      - name: Deploy locally on bigserver
+        shell: bash
+        run: |
+          set -eu
+          BRANCH='${{ github.ref_name }}'
+          if [ $BRANCH = master ]; then
+            DIR=/home/bigserver/hurricane-chat-prod
+            PROJECT=hurricane-chat-prod
+            PROFILE='--profile tunnel'
+          else
+            DIR=/home/bigserver/hurricane-chat-staging
+            PROJECT=hurricane-chat-staging
+            PROFILE=''
+          fi
+          cd $DIR
+          git fetch origin $BRANCH
+          git reset --hard origin/$BRANCH
+          docker network inspect hurricane-chat-ingress >/dev/null 2>&1 || docker network create hurricane-chat-ingress
+          docker compose -p $PROJECT $PROFILE build
+          docker compose -p $PROJECT $PROFILE up -d --remove-orphans
+          docker compose -p $PROJECT $PROFILE ps
+          docker compose -p $PROJECT exec -T backend getent hosts postgres
+          docker compose -p $PROJECT exec -T backend getent hosts redis
+          docker compose -p $PROJECT exec -T backend wget -q --spider http://127.0.0.1:3000/

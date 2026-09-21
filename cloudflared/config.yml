@@ -1,12 +1,12 @@
-tunnel: 0ee9d91e-2b1e-4a79-9d16-4a9dd524b40b
-credentials-file: /home/nonroot/.cloudflared/0ee9d91e-2b1e-4a79-9d16-4a9dd524b40b.json
+tunnel: 987acd9e-e509-4260-a898-8df84e5d8c6d
+credentials-file: /home/nonroot/.cloudflared/987acd9e-e509-4260-a898-8df84e5d8c6d.json
 
 ingress:
   - hostname: myhai.org
-    path: /jobs.*
-    service: http://jobboard:5000
+    path: /analyst.*
+    service: http://analyst-prod:5000
   - hostname: myhai.org
-    service: http://backend:3000
-  - hostname: ollama.myhai.org
-    service: http://ollama-proxy:4001
+    service: http://backend-prod:3000
+  - hostname: staging.myhai.org
+    service: http://backend-staging:3000
   - service: http_status:404
