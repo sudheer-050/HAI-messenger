@@ -537,8 +537,10 @@ app.get('/api/jobs/resume', requireJobAuth, async (req, res) => {
     res.json({ resume: result.rows[0] || null });
 });
 
-/* ---- Job sourcing: Adzuna (primary, needs a free API key) + RemoteOK (free,
-   no key, remote-only) as a zero-cost secondary. RemoteOK's `apply_url`/`url`
+/* ---- Job sourcing: Adzuna, USAJobs, and Jooble (need free API keys/
+   registration) + RemoteOK, Remotive, Arbeitnow, Jobicy, The Muse, and
+   Himalayas (fully free, no key) as zero-cost secondaries. USAJobs/Jooble
+   fetchers no-op until their env vars are set. RemoteOK's `apply_url`/`url`
    fields just point back to remoteok.com's own listing page -- its API never
    exposes the hiring company's real URL, and many of its postings are marked
    directApply:false, meaning even RemoteOK's own page funnels through itself
@@ -629,17 +631,245 @@ async function fetchRemoteOkJobs(roleQuery) {
     }
 }
 
+async function fetchRemotiveJobs(roleQuery) {
+    try {
+        const url = `https://remotive.com/api/remote-jobs?search=${encodeURIComponent(roleQuery)}`;
+        const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
+        if (!res.ok) throw new Error(`Remotive responded ${res.status}`);
+        const data = await res.json();
+        return (Array.isArray(data.jobs) ? data.jobs : [])
+            .slice(0, 20)
+            .map(j => ({
+                id: `remotive:${j.id}`,
+                source: 'remotive',
+                title: j.title,
+                company: j.company_name || null,
+                location: j.candidate_required_location || 'Remote',
+                salaryMin: null,
+                salaryMax: null,
+                remote: true,
+                description: j.description || '',
+                applyUrl: j.url,
+            }));
+    } catch (err) {
+        console.warn('Remotive fetch failed:', err.message);
+        return [];
+    }
+}
+
+async function fetchArbeitnowJobs(roleQuery) {
+    try {
+        const res = await fetchWithTimeout('https://www.arbeitnow.com/api/job-board-api', { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
+        if (!res.ok) throw new Error(`Arbeitnow responded ${res.status}`);
+        const data = await res.json();
+        // No search param on this API -- filter client-side, same approach as RemoteOK.
+        const needleWords = roleQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        return (Array.isArray(data.data) ? data.data : [])
+            .filter(j => {
+                const haystack = `${j.title} ${(j.tags || []).join(' ')}`.toLowerCase();
+                return needleWords.some(w => haystack.includes(w));
+            })
+            .slice(0, 20)
+            .map(j => ({
+                id: `arbeitnow:${j.slug}`,
+                source: 'arbeitnow',
+                title: j.title,
+                company: j.company_name || null,
+                location: j.location || (j.remote ? 'Remote' : null),
+                salaryMin: null,
+                salaryMax: null,
+                remote: !!j.remote,
+                description: j.description || '',
+                applyUrl: j.url,
+            }));
+    } catch (err) {
+        console.warn('Arbeitnow fetch failed:', err.message);
+        return [];
+    }
+}
+
+async function fetchJobicyJobs(roleQuery) {
+    try {
+        const url = `https://jobicy.com/api/v2/remote-jobs?count=20&tag=${encodeURIComponent(roleQuery)}`;
+        const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
+        if (!res.ok) throw new Error(`Jobicy responded ${res.status}`);
+        const data = await res.json();
+        return (Array.isArray(data.jobs) ? data.jobs : [])
+            .map(j => ({
+                id: `jobicy:${j.id}`,
+                source: 'jobicy',
+                title: j.jobTitle,
+                company: j.companyName || null,
+                location: j.jobGeo || 'Remote',
+                salaryMin: null,
+                salaryMax: null,
+                remote: true,
+                description: j.jobExcerpt || '',
+                applyUrl: j.url,
+            }));
+    } catch (err) {
+        console.warn('Jobicy fetch failed:', err.message);
+        return [];
+    }
+}
+
+async function fetchHimalayasJobs(roleQuery) {
+    try {
+        // `keyword` param is accepted but doesn't actually filter server-side --
+        // filter client-side against title/categories, same approach as RemoteOK.
+        const res = await fetchWithTimeout('https://himalayas.app/jobs/api?limit=100', { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
+        if (!res.ok) throw new Error(`Himalayas responded ${res.status}`);
+        const data = await res.json();
+        const needleWords = roleQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        return (Array.isArray(data.jobs) ? data.jobs : [])
+            .filter(j => {
+                const haystack = `${j.title} ${(j.categories || []).join(' ')}`.toLowerCase();
+                return needleWords.some(w => haystack.includes(w));
+            })
+            .slice(0, 20)
+            .map(j => ({
+                id: `himalayas:${j.guid || j.applicationLink}`,
+                source: 'himalayas',
+                title: j.title,
+                company: j.companyName || null,
+                location: (j.locationRestrictions || []).join(', ') || 'Remote',
+                salaryMin: j.minSalary || null,
+                salaryMax: j.maxSalary || null,
+                remote: true,
+                description: j.description || '',
+                applyUrl: j.applicationLink,
+            }));
+    } catch (err) {
+        console.warn('Himalayas fetch failed:', err.message);
+        return [];
+    }
+}
+
+async function fetchMuseJobs(roleQuery) {
+    try {
+        // No keyword param on this API -- filter client-side against name/categories.
+        const res = await fetchWithTimeout('https://www.themuse.com/api/public/jobs?page=1', { headers: { 'User-Agent': 'HAI-JobBoard/1.0' } }, 10000);
+        if (!res.ok) throw new Error(`The Muse responded ${res.status}`);
+        const data = await res.json();
+        const needleWords = roleQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        return (Array.isArray(data.results) ? data.results : [])
+            .filter(j => {
+                const cats = (j.categories || []).map(c => c.name).join(' ');
+                const haystack = `${j.name} ${cats}`.toLowerCase();
+                return needleWords.some(w => haystack.includes(w));
+            })
+            .slice(0, 20)
+            .map(j => ({
+                id: `muse:${j.id}`,
+                source: 'themuse',
+                title: j.name,
+                company: j.company?.name || null,
+                location: (j.locations || []).map(l => l.name).join('; ') || null,
+                salaryMin: null,
+                salaryMax: null,
+                remote: (j.locations || []).some(l => /remote|flexible/i.test(l.name || '')),
+                description: j.contents || '',
+                applyUrl: j.refs?.landing_page,
+            }));
+    } catch (err) {
+        console.warn('The Muse fetch failed:', err.message);
+        return [];
+    }
+}
+
+// USAJobs: free federal-jobs API but requires registering for a key at
+// developer.usajobs.gov (email + Authorization-Key). Optional, like Adzuna.
+const USAJOBS_API_KEY = process.env.USAJOBS_API_KEY || null;
+const USAJOBS_USER_AGENT = process.env.USAJOBS_USER_AGENT || null; // must be the email used to register
+
+async function fetchUsaJobsJobs(roleQuery, location) {
+    if (!USAJOBS_API_KEY || !USAJOBS_USER_AGENT) return [];
+    const params = new URLSearchParams({ Keyword: roleQuery, ResultsPerPage: '20' });
+    const nonGeographic = new Set(['remote', 'any', 'hybrid', 'onsite', 'on-site', 'on site']);
+    if (location && !nonGeographic.has(location.trim().toLowerCase())) params.set('LocationName', location);
+    try {
+        const res = await fetchWithTimeout(`https://data.usajobs.gov/api/search?${params.toString()}`, {
+            headers: { 'Host': 'data.usajobs.gov', 'User-Agent': USAJOBS_USER_AGENT, 'Authorization-Key': USAJOBS_API_KEY },
+        }, 10000);
+        if (!res.ok) throw new Error(`USAJobs responded ${res.status}`);
+        const data = await res.json();
+        const items = data.SearchResult?.SearchResultItems || [];
+        return items.map(item => {
+            const d = item.MatchedObjectDescriptor || {};
+            const pay = (d.PositionRemuneration || [])[0] || {};
+            return {
+                id: `usajobs:${d.PositionID || item.MatchedObjectId}`,
+                source: 'usajobs',
+                title: d.PositionTitle,
+                company: d.OrganizationName || null,
+                location: d.PositionLocationDisplay || null,
+                salaryMin: pay.MinimumRange ? Math.round(Number(pay.MinimumRange)) : null,
+                salaryMax: pay.MaximumRange ? Math.round(Number(pay.MaximumRange)) : null,
+                remote: false,
+                description: d.UserArea?.Details?.JobSummary || '',
+                applyUrl: d.PositionURI,
+            };
+        });
+    } catch (err) {
+        console.warn('USAJobs fetch failed:', err.message);
+        return [];
+    }
+}
+
+// Jooble: free API but requires registering for a key at jooble.org/api/about.
+// Optional, like Adzuna.
+const JOOBLE_API_KEY = process.env.JOOBLE_API_KEY || null;
+
+async function fetchJoobleJobs(roleQuery, location) {
+    if (!JOOBLE_API_KEY) return [];
+    const nonGeographic = new Set(['remote', 'any', 'hybrid', 'onsite', 'on-site', 'on site']);
+    const joobleLocation = location && !nonGeographic.has(location.trim().toLowerCase()) ? location : '';
+    try {
+        const res = await fetchWithTimeout(`https://jooble.org/api/${JOOBLE_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keywords: roleQuery, location: joobleLocation }),
+        }, 10000);
+        if (!res.ok) throw new Error(`Jooble responded ${res.status}`);
+        const data = await res.json();
+        return (Array.isArray(data.jobs) ? data.jobs : [])
+            .slice(0, 20)
+            .map(j => ({
+                id: `jooble:${j.id || j.link}`,
+                source: 'jooble',
+                title: j.title,
+                company: j.company || null,
+                location: j.location || null,
+                salaryMin: null,
+                salaryMax: null,
+                remote: /remote/i.test(j.title || '') || /remote/i.test(j.location || ''),
+                description: j.snippet || '',
+                applyUrl: j.link,
+            }));
+    } catch (err) {
+        console.warn('Jooble fetch failed:', err.message);
+        return [];
+    }
+}
+
 async function ensureJobCacheFresh(role, location) {
     const normalized = normalizeRoleQuery(role);
     const existing = await pgPool.query('SELECT MAX(fetched_at) AS latest FROM job_postings_cache WHERE role_query = $1', [normalized]);
     const latest = existing.rows[0]?.latest;
     if (latest && (Date.now() - new Date(latest).getTime()) < JOB_CACHE_TTL_MS) return;
 
-    const [adzunaJobs, remoteOkJobs] = await Promise.all([
+    const [adzunaJobs, remoteOkJobs, remotiveJobs, arbeitnowJobs, jobicyJobs, himalayasJobs, museJobs, usaJobsJobs, joobleJobs] = await Promise.all([
         fetchAdzunaJobs(normalized, location),
         fetchRemoteOkJobs(normalized),
+        fetchRemotiveJobs(normalized),
+        fetchArbeitnowJobs(normalized),
+        fetchJobicyJobs(normalized),
+        fetchHimalayasJobs(normalized),
+        fetchMuseJobs(normalized),
+        fetchUsaJobsJobs(normalized, location),
+        fetchJoobleJobs(normalized, location),
     ]);
-    for (const job of [...adzunaJobs, ...remoteOkJobs]) {
+    for (const job of [...adzunaJobs, ...remoteOkJobs, ...remotiveJobs, ...arbeitnowJobs, ...jobicyJobs, ...himalayasJobs, ...museJobs, ...usaJobsJobs, ...joobleJobs]) {
         try {
             await pgPool.query(
                 `INSERT INTO job_postings_cache (id, source, role_query, title, company, location, salary_min, salary_max, remote, description, apply_url, fetched_at)
