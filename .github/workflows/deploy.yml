@@ -37,4 +37,12 @@ jobs:
           docker compose -p $PROJECT $PROFILE ps
           docker compose -p $PROJECT exec -T backend getent hosts postgres
           docker compose -p $PROJECT exec -T backend getent hosts redis
-          docker compose -p $PROJECT exec -T backend wget -q --spider http://127.0.0.1:3000/
+          ready=0
+          for attempt in $(seq 1 30); do
+            if docker compose -p $PROJECT exec -T backend wget -q --spider http://127.0.0.1:3000/; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          [ $ready -eq 1 ]
