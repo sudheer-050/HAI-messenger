@@ -6,6 +6,12 @@ ingress:
     path: /analyst.*
     service: http://analyst-prod:5000
   - hostname: myhai.org
+    path: /jobs.*
+    service: http://job-portal-prod:3000
+  - hostname: myhai.org
+    path: /api/jobs/.*
+    service: http://job-portal-prod:3000
+  - hostname: myhai.org
     service: http://backend-prod:3000
   - hostname: staging.myhai.org
     service: http://backend-staging:3000
