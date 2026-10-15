@@ -1,5 +1,7 @@
 # HAI
 
+![HAI Messenger desktop chat](docs/images/hai-messenger.png)
+
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
 ![Node](https://img.shields.io/badge/node-18-339933?logo=node.js&logoColor=white)
