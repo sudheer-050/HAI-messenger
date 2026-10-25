@@ -1,48 +1,28 @@
-name: Deploy
+name: Deployment ownership
 
 on:
   push:
     branches: [staging, master]
+  workflow_dispatch:
 
-concurrency:
-  group: deploy-${{ github.ref_name }}
-  cancel-in-progress: false
+permissions:
+  contents: read
 
 jobs:
-  deploy:
-    runs-on: [self-hosted, linux, x64, bigserver]
-    timeout-minutes: 30
-    environment: ${{ github.ref_name == 'master' && 'production' || 'staging' }}
+  deployment-location:
+    name: Report deployment owner
+    runs-on: ubuntu-latest
     steps:
-      - name: Deploy locally on bigserver
+      - name: Explain deployment ownership
         shell: bash
         run: |
-          set -eu
-          BRANCH='${{ github.ref_name }}'
-          if [ $BRANCH = master ]; then
-            DIR=/home/bigserver/hurricane-chat-prod
-            PROJECT=hurricane-chat-prod
-            PROFILE='--profile tunnel'
-          else
-            DIR=/home/bigserver/hurricane-chat-staging
-            PROJECT=hurricane-chat-staging
-            PROFILE=''
-          fi
-          cd $DIR
-          git fetch origin $BRANCH
-          git reset --hard origin/$BRANCH
-          docker network inspect hurricane-chat-ingress >/dev/null 2>&1 || docker network create hurricane-chat-ingress
-          docker compose -p $PROJECT $PROFILE build
-          docker compose -p $PROJECT $PROFILE up -d --remove-orphans
-          docker compose -p $PROJECT $PROFILE ps
-          docker compose -p $PROJECT exec -T backend getent hosts postgres
-          docker compose -p $PROJECT exec -T backend getent hosts redis
-          ready=0
-          for attempt in $(seq 1 30); do
-            if docker compose -p $PROJECT exec -T backend wget -q --spider http://127.0.0.1:3000/; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          [ $ready -eq 1 ]
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## Deployment is managed by HGPT
+
+          This repository runs its own CI. It does not deploy myhai.org.
+          The live checkout and Bigserver runner belong to `sudheer-050/Hgpt`.
+          Deploy changes through that repository's staging/master branches:
+          https://github.com/sudheer-050/Hgpt/actions/workflows/deploy.yml
+
+          No production or staging deployment was performed by this run.
+          SUMMARY

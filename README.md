@@ -11,6 +11,17 @@ A self-hosted, end-to-end encrypted chat app. Single-file PWA frontend, a small 
 
 **Live instance:** https://myhai.org (open to the public — no login required to try it)
 
+### Deployment ownership
+
+The live myhai.org checkout and Bigserver Actions runner are managed by
+[`sudheer-050/Hgpt`](https://github.com/sudheer-050/Hgpt).
+This repository runs its own CI; its deployment workflow reports the canonical
+deployment location without deploying either environment. To ship a change to
+myhai.org, land it in HGPT's staging/master branch and use that repository's
+[Deploy workflow](https://github.com/sudheer-050/Hgpt/actions/workflows/deploy.yml).
+Production deployment approvals remain in place.
+
+
 ## Features
 
 - **End-to-end encryption** — hybrid RSA-OAEP-2048 + AES-256-GCM envelope encryption. The server only ever relays ciphertext.
